@@ -57,6 +57,8 @@ class FlashProgress:
     # True while the phase can still be safely cancelled (no bytes on the
     # card yet); False once the raw write has started or later.
     cancellable: bool = False
+    # Non-fatal problems that must remain visible on the final success screen.
+    warning: bool = False
 
 
 ProgressCallback = Callable[[FlashProgress], None]
@@ -374,6 +376,7 @@ def _flash_inner(
                     f"Boot partition customization skipped: {skip_reason}",
                     0,
                     1,
+                    warning=True,
                 )
             )
 
@@ -384,7 +387,15 @@ def _flash_inner(
     progress_cb(FlashProgress("Ejecting", 0, 1))
     # Write already succeeded; a failed eject (e.g. card pulled by the
     # user right at the end) shouldn't be reported as failure.
-    if disks.best_effort(lambda: disks.eject_disk(disk.device_node)):
-        progress_cb(FlashProgress("Eject skipped (already removed?)", 0, 1))
+    eject_error = disks.best_effort(lambda: disks.eject_disk(disk.device_node))
+    if eject_error:
+        progress_cb(
+            FlashProgress(
+                f"Could not eject the card: {eject_error}",
+                0,
+                1,
+                warning=True,
+            )
+        )
 
     progress_cb(FlashProgress("Done", 1, 1))

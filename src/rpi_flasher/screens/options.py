@@ -1,16 +1,19 @@
-"""SSH/WLAN/delete-after-flash checkboxes, pre-filled from saved prefs."""
+"""SSH/WLAN/delete-after-flash checkboxes. WLAN details (SSID/password/
+country) are collected on a separate follow-up screen only if requested,
+so this screen stays a quick yes/no gate rather than a wall of fields."""
 
 from __future__ import annotations
 
 from typing import ClassVar
 
 from textual.app import ComposeResult
-from textual.containers import Container, Vertical
+from textual.containers import Container
 from textual.screen import Screen
-from textual.widgets import Button, Checkbox, Footer, Header, Input, Static
+from textual.widgets import Button, Checkbox, Footer, Header, Static
 
 from rpi_flasher import config
-from rpi_flasher.state import FlashOptions, WlanConfig, wizard_state
+from rpi_flasher.state import FlashOptions, finish_options
+from rpi_flasher.utils import STEP_OPTIONS, step_title
 
 
 class OptionsScreen(Screen):
@@ -19,25 +22,16 @@ class OptionsScreen(Screen):
     def compose(self) -> ComposeResult:
         yield Header()
         yield Container(
-            Static("Configure options", id="title"),
-            Checkbox("Enable SSH", id="enable-ssh"),
-            Checkbox("Setup WLAN", id="setup-wlan"),
-            Vertical(
-                Input(placeholder="SSID", id="wlan-ssid"),
-                Input(
-                    placeholder="Password", password=True, id="wlan-password"
-                ),
-                Input(
-                    placeholder="Country code (e.g. US, DE)", id="wlan-country"
-                ),
-                id="wlan-fields",
-            ),
+            Static(step_title(STEP_OPTIONS), id="title"),
+            Static("Customize the image before flashing.", classes="hint"),
+            Checkbox("Enable SSH", id="enable-ssh", compact=True),
+            Checkbox("Setup WLAN", id="setup-wlan", compact=True),
             Checkbox(
                 "Delete downloaded image after successful flash",
                 id="delete-after-flash",
+                compact=True,
             ),
-            Static("", id="validation-error"),
-            Button("Next", id="next-button", variant="primary"),
+            Button("Next", id="next-button", variant="primary", compact=True),
             id="options-body",
         )
         yield Footer()
@@ -46,20 +40,6 @@ class OptionsScreen(Screen):
         prefs = config.load_preferences()
         self.query_one("#enable-ssh", Checkbox).value = prefs.enable_ssh
         self.query_one("#setup-wlan", Checkbox).value = prefs.setup_wlan
-        if prefs.wlan:
-            self.query_one("#wlan-ssid", Input).value = prefs.wlan.ssid
-            self.query_one("#wlan-password", Input).value = prefs.wlan.password
-            self.query_one("#wlan-country", Input).value = prefs.wlan.country
-        self._sync_wlan_visibility()
-
-    def _sync_wlan_visibility(self) -> None:
-        self.query_one("#wlan-fields", Vertical).display = self.query_one(
-            "#setup-wlan", Checkbox
-        ).value
-
-    def on_checkbox_changed(self, event: Checkbox.Changed) -> None:
-        if event.checkbox.id == "setup-wlan":
-            self._sync_wlan_visibility()
 
     def on_button_pressed(self, event: Button.Pressed) -> None:
         if event.button.id != "next-button":
@@ -71,30 +51,17 @@ class OptionsScreen(Screen):
             "#delete-after-flash", Checkbox
         ).value
 
-        wlan = None
-        if setup_wlan:
-            ssid = self.query_one("#wlan-ssid", Input).value.strip()
-            if not ssid:
-                self.query_one("#validation-error", Static).update(
-                    "SSID is required when WLAN setup is enabled."
-                )
-                return
-            wlan = WlanConfig(
-                ssid=ssid,
-                password=self.query_one("#wlan-password", Input).value,
-                country=self.query_one("#wlan-country", Input).value.strip()
-                or "US",
-            )
-
         options = FlashOptions(
             enable_ssh=enable_ssh,
             setup_wlan=setup_wlan,
-            wlan=wlan,
+            wlan=None,
             delete_image_after_flash=delete_after_flash,
         )
-        wizard_state(self).options = options
-        config.save_preferences(options)
 
-        from rpi_flasher.screens.overview import OverviewScreen
+        if setup_wlan:
+            from rpi_flasher.screens.wlan_details import WlanDetailsScreen
 
-        self.app.push_screen(OverviewScreen())
+            self.app.push_screen(WlanDetailsScreen(options))
+            return
+
+        finish_options(self, options)

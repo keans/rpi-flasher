@@ -1,4 +1,7 @@
-"""Confirmation screen: summarizes choices, gates on typing the device node."""
+"""Review screen: summarizes every choice with a plain Next button. The
+actual destructive yes/no decision lives on a separate modal dialog
+(ConfirmFlashDialog), so this screen can be as long as it needs to be
+without the confirm/deny buttons ever scrolling out of view."""
 
 from __future__ import annotations
 
@@ -7,14 +10,14 @@ from typing import ClassVar
 from textual.app import ComposeResult
 from textual.containers import Container
 from textual.screen import Screen
-from textual.widgets import Button, Footer, Header, Input, Static
+from textual.widgets import Button, Footer, Header, Static
 
 from rpi_flasher.state import wizard_state
-from rpi_flasher.utils import human_bytes
+from rpi_flasher.utils import STEP_CONFIRM, human_bytes, step_title
 
 # SD cards top out well below this in practice; a "SD card" reporting more
 # is a strong signal the wrong device was selected (e.g. a USB dock that
-# slipped past the bus-protocol filter).
+# slipped past the removable-media filter).
 SUSPICIOUSLY_LARGE_BYTES = 512 * 1024**3
 
 
@@ -49,15 +52,12 @@ class OverviewScreen(Screen):
             )
         else:
             lines.append("WLAN: not configured")
-        lines.append(
-            "Delete image after flash: "
-            + ("yes" if options.delete_image_after_flash else "no")
-        )
         if image.devices:
             lines.append(f"Compatible devices: {', '.join(image.devices)}")
 
+        too_big = _image_too_large(image, disk)
         warnings = []
-        if _image_too_large(image, disk):
+        if too_big:
             warnings.append(
                 f"ERROR: the image ({human_bytes(image.extract_size)}) is "
                 f"larger than the card ({human_bytes(disk.size_bytes)}) -- "
@@ -71,39 +71,45 @@ class OverviewScreen(Screen):
                 "right device before continuing."
             )
 
+        warnings_static = Static("\n".join(warnings), id="warnings")
+        warnings_static.display = bool(warnings)
+
         yield Header()
         yield Container(
-            Static("Confirm and flash", id="title"),
-            Static("\n".join(lines), id="summary"),
-            Static("\n".join(warnings), id="warnings"),
+            Static(step_title(STEP_CONFIRM), id="title"),
             Static(
-                "This will ERASE all data on "
-                f"{disk.device_node}. Type the device path "
-                "to confirm:",
-                id="confirm-prompt",
+                "Review every choice carefully before erasing the card.",
+                classes="hint",
             ),
-            Input(placeholder=disk.device_node, id="confirm-input"),
+            Static("\n".join(lines), id="summary"),
+            warnings_static,
             Button(
-                "Flash Now",
-                id="flash-button",
-                variant="error",
-                disabled=True,
+                "Next",
+                id="next-button",
+                variant="primary",
+                compact=True,
+                disabled=too_big,
             ),
             id="overview-body",
         )
         yield Footer()
 
-    def on_input_changed(self, event: Input.Changed) -> None:
-        if event.input.id != "confirm-input":
-            return
-        state = wizard_state(self)
-        too_big = _image_too_large(state.image, state.disk)
-        button = self.query_one("#flash-button", Button)
-        button.disabled = too_big or event.value != state.disk.device_node
-
     def on_button_pressed(self, event: Button.Pressed) -> None:
-        if event.button.id != "flash-button":
+        if event.button.id != "next-button":
             return
-        from rpi_flasher.screens.flash_progress import FlashProgressScreen
 
-        self.app.push_screen(FlashProgressScreen())
+        state = wizard_state(self)
+
+        def handle_result(confirmed: bool) -> None:
+            if confirmed:
+                from rpi_flasher.screens.flash_progress import (
+                    FlashProgressScreen,
+                )
+
+                self.app.push_screen(FlashProgressScreen())
+
+        from rpi_flasher.screens.confirm_dialog import ConfirmFlashDialog
+
+        self.app.push_screen(
+            ConfirmFlashDialog(state.disk.device_node), handle_result
+        )

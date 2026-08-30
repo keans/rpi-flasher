@@ -16,7 +16,7 @@ def test_save_and_load_preferences_round_trip(tmp_path, monkeypatch):
         wlan=WlanConfig(ssid="home", password="secret", country="DE"),
         delete_image_after_flash=True,
     )
-    config.save_preferences(options)
+    config.save_preferences(options, remember_wlan=True)
     loaded = config.load_preferences()
 
     assert loaded.enable_ssh is True
@@ -26,6 +26,20 @@ def test_save_and_load_preferences_round_trip(tmp_path, monkeypatch):
     )
     # delete_image_after_flash is a per-run choice, not persisted.
     assert loaded.delete_image_after_flash is False
+
+
+def test_wifi_credentials_are_not_saved_without_explicit_opt_in(
+    tmp_path, monkeypatch
+):
+    monkeypatch.setattr(config, "invoking_user_home", lambda: str(tmp_path))
+    options = FlashOptions(
+        setup_wlan=True,
+        wlan=WlanConfig(ssid="home", password="secret", country="DE"),
+    )
+
+    config.save_preferences(options)
+
+    assert config.load_preferences().wlan is None
 
 
 def test_save_preferences_writes_owner_only_permissions(tmp_path, monkeypatch):

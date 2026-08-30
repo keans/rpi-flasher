@@ -1,9 +1,8 @@
 """Persisted user preferences (SSH/Wi-Fi) so the Options screen can be
 pre-filled on subsequent runs.
 
-Stored as plaintext JSON at ~/.config/rpi-flasher/config.json with 0600
-permissions. The Wi-Fi password is stored in plaintext (not keychain-backed)
--- a deliberate v1 tradeoff, documented in the README.
+Stored as JSON at ~/.config/rpi-flasher/config.json with 0600 permissions.
+Wi-Fi credentials are only stored when the user explicitly opts in.
 """
 
 from __future__ import annotations
@@ -46,7 +45,9 @@ def load_preferences() -> FlashOptions:
     )
 
 
-def save_preferences(options: FlashOptions) -> None:
+def save_preferences(
+    options: FlashOptions, *, remember_wlan: bool = False
+) -> None:
     """Persist ssh/wifi preferences. Does not persist delete_image_after_flash,
     which is a per-run choice rather than a durable preference."""
     ensure_user_owned_dir(config_dir())
@@ -54,7 +55,9 @@ def save_preferences(options: FlashOptions) -> None:
     data = {
         "enable_ssh": options.enable_ssh,
         "setup_wlan": options.setup_wlan,
-        "wlan": asdict(options.wlan) if options.wlan else None,
+        "wlan": asdict(options.wlan)
+        if remember_wlan and options.wlan
+        else None,
     }
     write_user_owned_file(
         config_path(), json.dumps(data, indent=2), mode=0o600

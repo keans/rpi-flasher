@@ -1,24 +1,56 @@
-from rpi_flasher.disks import DiskError, _is_sd_card, best_effort
+from rpi_flasher.disks import DiskError, _is_removable, best_effort
 
 
-def test_is_sd_card_by_bus_protocol():
-    assert _is_sd_card({"BusProtocol": "Secure Digital"}) is True
+def test_is_removable_true_for_sd_card():
+    assert _is_removable({"RemovableMedia": True}) is True
 
 
-def test_is_sd_card_by_media_name():
-    assert _is_sd_card({"MediaName": "SDXC Card Media"}) is True
-
-
-def test_is_sd_card_rejects_usb_hard_drive():
+def test_is_removable_true_for_generic_usb_card_reader():
+    # Many USB SD readers report nothing SD-specific at all.
     assert (
-        _is_sd_card({"BusProtocol": "USB", "MediaName": "External USB SSD"})
+        _is_removable(
+            {
+                "BusProtocol": "USB",
+                "MediaName": "MassStorageClass",
+                "RemovableMedia": True,
+            }
+        )
+        is True
+    )
+
+
+def test_is_removable_rejects_fixed_usb_hard_drive():
+    assert (
+        _is_removable(
+            {
+                "BusProtocol": "USB",
+                "MediaName": "External USB SSD",
+                "RemovableMedia": False,
+            }
+        )
         is False
     )
 
 
-def test_is_sd_card_rejects_internal_ssd():
+def test_is_removable_rejects_mounted_disk_image():
+    # Mounted .dmg files report RemovableMedia=True too, but they're
+    # virtual -- not something you could ever flash.
     assert (
-        _is_sd_card({"BusProtocol": "PCI-Express", "MediaName": "APPLE SSD"})
+        _is_removable(
+            {
+                "BusProtocol": "Disk Image",
+                "MediaName": "Disk Image",
+                "RemovableMedia": True,
+                "VirtualOrPhysical": "Virtual",
+            }
+        )
+        is False
+    )
+
+
+def test_is_removable_rejects_internal_ssd():
+    assert (
+        _is_removable({"BusProtocol": "PCI-Express", "MediaName": "APPLE SSD"})
         is False
     )
 

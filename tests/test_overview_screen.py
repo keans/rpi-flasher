@@ -3,6 +3,7 @@ import asyncio
 from textual.widgets import Button, Static
 
 from rpi_flasher.app import RpiFlasherApp
+from rpi_flasher.screens.confirm_dialog import ConfirmFlashDialog
 from rpi_flasher.screens.overview import OverviewScreen
 from rpi_flasher.state import DiskInfo, ImageEntry
 
@@ -23,7 +24,7 @@ def _image(extract_size: int) -> ImageEntry:
     )
 
 
-def test_flash_button_disabled_when_image_larger_than_disk():
+def test_next_button_disabled_when_image_larger_than_disk():
     async def run():
         app = RpiFlasherApp()
         async with app.run_test() as pilot:
@@ -36,10 +37,7 @@ def test_flash_button_disabled_when_image_larger_than_disk():
             await pilot.pause()
 
             screen = app.screen
-            screen.query_one("#confirm-input").value = "/dev/disk9"
-            await pilot.pause()
-
-            assert screen.query_one("#flash-button", Button).disabled is True
+            assert screen.query_one("#next-button", Button).disabled is True
             assert "larger than the card" in str(
                 screen.query_one("#warnings", Static).render()
             )
@@ -47,7 +45,7 @@ def test_flash_button_disabled_when_image_larger_than_disk():
     asyncio.run(run())
 
 
-def test_flash_button_enabled_when_image_fits():
+def test_next_button_opens_confirm_dialog():
     async def run():
         app = RpiFlasherApp()
         async with app.run_test() as pilot:
@@ -60,10 +58,14 @@ def test_flash_button_enabled_when_image_fits():
             await pilot.pause()
 
             screen = app.screen
-            screen.query_one("#confirm-input").value = "/dev/disk9"
+            next_button = screen.query_one("#next-button", Button)
+            assert next_button.disabled is False
+            next_button.focus()
+            await pilot.pause()
+            await pilot.press("enter")
             await pilot.pause()
 
-            assert screen.query_one("#flash-button", Button).disabled is False
+            assert isinstance(app.screen, ConfirmFlashDialog)
 
     asyncio.run(run())
 
@@ -84,8 +86,6 @@ def test_suspiciously_large_disk_shows_warning_but_stays_enabled():
             assert "unusually large" in str(
                 screen.query_one("#warnings", Static).render()
             )
-            screen.query_one("#confirm-input").value = "/dev/disk9"
-            await pilot.pause()
-            assert screen.query_one("#flash-button", Button).disabled is False
+            assert screen.query_one("#next-button", Button).disabled is False
 
     asyncio.run(run())

@@ -8,11 +8,11 @@ from typing import ClassVar
 from textual.app import ComposeResult
 from textual.containers import Container
 from textual.screen import Screen
-from textual.widgets import DataTable, Footer, Header, Static
+from textual.widgets import DataTable, Footer, Header, LoadingIndicator, Static
 
 from rpi_flasher import disks
 from rpi_flasher.state import DiskInfo, wizard_state
-from rpi_flasher.utils import human_bytes
+from rpi_flasher.utils import STEP_DISK, human_bytes, step_title
 
 
 class DiskSelectScreen(Screen):
@@ -25,7 +25,12 @@ class DiskSelectScreen(Screen):
     def compose(self) -> ComposeResult:
         yield Header()
         yield Container(
-            Static("Select the SD card to flash", id="title"),
+            Static(step_title(STEP_DISK), id="title"),
+            Static(
+                "Insert an SD card, then select it with the arrow keys and Enter.",
+                classes="hint",
+            ),
+            LoadingIndicator(id="scanning"),
             DataTable(id="disk-table"),
             Static("", id="empty-state"),
             id="disk-select-body",
@@ -42,10 +47,22 @@ class DiskSelectScreen(Screen):
         self.run_worker(self._rescan(), exclusive=True)
 
     async def _rescan(self) -> None:
-        self._disks = await asyncio.to_thread(disks.list_external_disks)
         table = self.query_one(DataTable)
-        table.clear()
         empty = self.query_one("#empty-state", Static)
+        loading = self.query_one("#scanning", LoadingIndicator)
+
+        loading.display = True
+        table.display = False
+        empty.display = False
+        try:
+            self._disks = await asyncio.to_thread(disks.list_external_disks)
+        except disks.DiskError as exc:
+            loading.display = False
+            empty.display = True
+            empty.update(f"{exc}\n\nPress 'r' to rescan.")
+            return
+        loading.display = False
+        table.clear()
 
         if not self._disks:
             table.display = False
@@ -71,6 +88,6 @@ class DiskSelectScreen(Screen):
         index = event.cursor_row
         if 0 <= index < len(self._disks):
             wizard_state(self).disk = self._disks[index]
-            from rpi_flasher.screens.image_select import ImageSelectScreen
+            from rpi_flasher.screens.device_select import DeviceSelectScreen
 
-            self.app.push_screen(ImageSelectScreen())
+            self.app.push_screen(DeviceSelectScreen())

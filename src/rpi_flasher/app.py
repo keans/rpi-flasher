@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import shutil
 import sys
+from typing import ClassVar
 
 from textual.app import App
 
@@ -16,6 +17,11 @@ class RpiFlasherApp(App):
     """Wizard: select SD card -> select image -> options -> confirm -> flash."""
 
     CSS_PATH = "app.tcss"
+    TITLE = "Raspberry Pi Flasher"
+    SUB_TITLE = "Safe, keyboard-driven SD card imaging"
+    # Global quit shortcut, available on every screen; input widgets consume
+    # "q" as text while focused, so this doesn't interfere with typing.
+    BINDINGS: ClassVar = [("q", "quit", "Quit")]
 
     def __init__(self) -> None:
         super().__init__()

@@ -79,10 +79,10 @@ def _entry(**overrides) -> ImageEntry:
 
 def test_display_label_shows_cached_status():
     entry = _entry()
-    assert display_label(entry, cached=True) == "[Cached] Test OS"
+    assert display_label(entry, cached=True) == "Test OS -- ✓ Cached"
 
 
-def test_display_label_shows_download_size_with_category():
-    entry = _entry(category_path=["Media player OS"])
+def test_display_label_shows_download_size():
+    entry = _entry()
     label = display_label(entry, cached=False)
-    assert label == "[Download 2.0 MB] [Media player OS] Test OS"
+    assert label == "Test OS -- ⬇ Download 2.0 MB"

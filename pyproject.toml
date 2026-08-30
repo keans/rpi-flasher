@@ -1,7 +1,7 @@
 [project]
 name = "rpi-flasher"
 version = "0.1.0"
-description = "Add your description here"
+description = "A keyboard-driven macOS TUI for flashing Raspberry Pi OS images"
 readme = "README.md"
 authors = [
     { name = "Ansgar Kellner", email = "keans@gmx.de" }

@@ -1,10 +1,19 @@
 """macOS disk enumeration and lifecycle helpers, built around `diskutil`.
 
-Only actual SD cards are surfaced (not USB hard drives/SSDs, internal
-disks, or other removable media) -- identified via `diskutil info`'s
-BusProtocol/MediaName/DeviceTreePath, which for a real SD card reader/slot
-reports a "Secure Digital"/"SD"/card-reader bus protocol rather than "USB"
-generically or "PCI-Express"/"SATA" for internal drives.
+Removable media only (not internal disks, and not "regular" external
+HDDs/SSDs) is surfaced as a flash target. The reliable signal for this
+turns out to be diskutil's own RemovableMedia flag rather than trying to
+recognize "SD-ness" from bus protocol or product-name strings: real SD
+cards report a "Secure Digital" bus protocol, but SD cards plugged in via
+a generic USB card reader/adapter often report nothing SD-specific at all
+(BusProtocol "USB", MediaName/IORegistryEntryName just "MassStorageClass")
+-- indistinguishable from an SD card by name alone. External hard
+drives/SSDs, even over USB, are normally reported as fixed media
+(RemovableMedia false) rather than removable, so filtering on
+RemovableMedia keeps the "no regular hard drives" guarantee without
+needing to guess at SD-specific wording. Mounted disk images (.dmg) also
+report RemovableMedia=True, so VirtualOrPhysical is checked too, to
+exclude those virtual devices.
 """
 
 from __future__ import annotations
@@ -16,9 +25,6 @@ from collections.abc import Callable
 from pathlib import Path
 
 from rpi_flasher.state import DiskInfo
-
-SD_BUS_PROTOCOL_HINTS = ("secure digital", "sd card", "sdio")
-SD_MEDIA_NAME_HINTS = ("sd card", "sdhc", "sdxc", "sdsc")
 
 
 class DiskError(RuntimeError):
@@ -41,23 +47,27 @@ def _run_plist(args: list[str]) -> dict:
     return plistlib.loads(result.stdout)
 
 
-def _is_sd_card(info: dict) -> bool:
-    bus_protocol = str(info.get("BusProtocol", "")).lower()
-    media_name = str(info.get("MediaName", "")).lower()
-    device_tree_path = str(info.get("DeviceTreePath", "")).lower()
-
-    if any(hint in bus_protocol for hint in SD_BUS_PROTOCOL_HINTS):
-        return True
-    if any(hint in media_name for hint in SD_MEDIA_NAME_HINTS):
-        return True
-    return "sdio" in device_tree_path or "sd-card" in device_tree_path
+def _is_removable(info: dict) -> bool:
+    # Mounted disk images (.dmg) also report RemovableMedia=True, but
+    # they're virtual, not a device you could ever flash -- diskutil's
+    # own VirtualOrPhysical flag is what actually distinguishes them.
+    if info.get("VirtualOrPhysical") == "Virtual":
+        return False
+    return bool(info.get("RemovableMedia", False))
 
 
 def list_external_disks() -> list[DiskInfo]:
-    """Return SD cards only -- external, removable, writable, and identified
-    as SD media by bus protocol / media name. Excludes internal disks and
-    other USB mass-storage devices (external HDDs/SSDs/flash drives)."""
-    listing = _run_plist(["diskutil", "list", "-plist"])
+    """Return removable, writable, external disks -- the set of things it
+    is plausible to flash. Excludes internal disks and "regular" external
+    hard drives/SSDs (fixed media, even over USB)."""
+    try:
+        listing = _run_plist(["diskutil", "list", "-plist"])
+    except (
+        subprocess.CalledProcessError,
+        OSError,
+        plistlib.InvalidFileException,
+    ) as exc:
+        raise DiskError(f"Could not scan disks: {exc}") from exc
     whole_disks: list[str] = listing.get("WholeDisks", [])
 
     disks: list[DiskInfo] = []
@@ -72,7 +82,7 @@ def list_external_disks() -> list[DiskInfo]:
             continue
         if not info.get("WritableMedia", False):
             continue
-        if not _is_sd_card(info):
+        if not _is_removable(info):
             continue
 
         volume_names = _volume_names_for(device_id, listing)
@@ -89,10 +99,10 @@ def list_external_disks() -> list[DiskInfo]:
 
 
 def diagnose_disks() -> list[str]:
-    """Explain, per whole disk, why it was or wasn't offered as an SD
-    card. Only called when the SD-card list comes back empty, to help a
-    user figure out why their card isn't showing up (e.g. an unsupported
-    reader/bus protocol) without needing to run diskutil manually."""
+    """Explain, per whole disk, why it was or wasn't offered as a flash
+    target. Only called when the list comes back empty, to help a user
+    figure out why their card/reader isn't showing up without needing to
+    run diskutil manually."""
     try:
         listing = _run_plist(["diskutil", "list", "-plist"])
     except subprocess.CalledProcessError as exc:
@@ -115,15 +125,20 @@ def diagnose_disks() -> list[str]:
             messages.append(f"{device_node}: excluded (internal disk)")
         elif not info.get("WritableMedia", False):
             messages.append(f"{device_node}: excluded (not writable)")
-        elif not _is_sd_card(info):
+        elif info.get("VirtualOrPhysical") == "Virtual":
+            messages.append(
+                f"{device_node}: excluded (virtual disk image, not a "
+                "physical device)"
+            )
+        elif not _is_removable(info):
             bus = info.get("BusProtocol", "unknown")
             media = info.get("MediaName", "unknown")
             messages.append(
-                f"{device_node}: excluded (not recognized as an SD card "
-                f"-- bus={bus!r}, media={media!r})"
+                f"{device_node}: excluded (not removable media -- likely "
+                f"a fixed external drive -- bus={bus!r}, media={media!r})"
             )
         else:
-            messages.append(f"{device_node}: recognized as an SD card")
+            messages.append(f"{device_node}: recognized as removable media")
     return messages
 
 

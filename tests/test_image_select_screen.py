@@ -1,23 +1,11 @@
 import asyncio
 
-import httpx
-from textual.widgets import Input, OptionList
+from textual.widgets import OptionList
 
 from rpi_flasher import images
 from rpi_flasher.app import RpiFlasherApp
 from rpi_flasher.screens.image_select import ImageSelectScreen
 from rpi_flasher.state import ImageEntry
-
-
-def _block_network(monkeypatch) -> None:
-    """Screens fetch the OS list on mount; block that so these tests never
-    hit the real network, and drive screen state directly instead."""
-
-    async def fail_fetch():
-        raise httpx.ConnectError("network disabled in tests")
-
-    monkeypatch.setattr(images, "fetch_os_list", fail_fetch)
-    monkeypatch.setattr(images, "load_snapshot", lambda: None)
 
 
 def _entry(name: str, devices: list[str], sha: str) -> ImageEntry:
@@ -36,36 +24,58 @@ def _entry(name: str, devices: list[str], sha: str) -> ImageEntry:
     )
 
 
-def test_filter_narrows_by_device(monkeypatch, tmp_path):
-    _block_network(monkeypatch)
+def test_lists_all_entries_without_a_filter(tmp_path, monkeypatch):
     monkeypatch.setattr(images, "images_dir", lambda: tmp_path)
     entries = [
         _entry("Raspberry Pi OS", ["pi5-64bit"], "aaa"),
-        _entry("Ubuntu Server", ["pi4-64bit"], "bbb"),
+        _entry("Ubuntu Server", ["pi5-64bit"], "bbb"),
     ]
 
     async def run():
         app = RpiFlasherApp()
         async with app.run_test() as pilot:
             await pilot.pause()
-            screen = ImageSelectScreen()
+            screen = ImageSelectScreen(entries)
             app.push_screen(screen)
             await pilot.pause()
-            screen._relabel_all(entries)
-            screen._apply_filter("")
-            assert len(screen._filtered) == 2
+            option_list = screen.query_one("#image-list", OptionList)
+            assert option_list.option_count == 2
 
-            screen.query_one("#filter", Input).value = "pi5"
-            screen._apply_filter("pi5")
-            assert [e.name for e in screen._filtered] == ["Raspberry Pi OS"]
+    asyncio.run(run())
+
+
+def test_arrow_keys_navigate_list(tmp_path, monkeypatch):
+    monkeypatch.setattr(images, "images_dir", lambda: tmp_path)
+    entries = [
+        _entry("Raspberry Pi OS", ["pi5-64bit"], "aaa"),
+        _entry("Ubuntu Server", ["pi5-64bit"], "bbb"),
+    ]
+
+    async def run():
+        app = RpiFlasherApp()
+        async with app.run_test() as pilot:
+            await pilot.pause()
+            screen = ImageSelectScreen(entries)
+            app.push_screen(screen)
+            await pilot.pause()
+
+            option_list = screen.query_one("#image-list", OptionList)
+            option_list.highlighted = 0
+            option_list.focus()
+            await pilot.pause()
+
+            await pilot.press("down")
+            assert option_list.highlighted == 1
+
+            await pilot.press("up")
+            assert option_list.highlighted == 0
 
     asyncio.run(run())
 
 
 def test_delete_cached_binding_removes_cache_and_updates_label(
-    monkeypatch, tmp_path
+    tmp_path, monkeypatch
 ):
-    _block_network(monkeypatch)
     monkeypatch.setattr(images, "images_dir", lambda: tmp_path)
     entry = _entry("Raspberry Pi OS", ["pi5-64bit"], "aaa")
     images.cache_path_for(entry).write_bytes(b"x" * 5)
@@ -75,11 +85,9 @@ def test_delete_cached_binding_removes_cache_and_updates_label(
         app = RpiFlasherApp()
         async with app.run_test() as pilot:
             await pilot.pause()
-            screen = ImageSelectScreen()
+            screen = ImageSelectScreen([entry])
             app.push_screen(screen)
             await pilot.pause()
-            screen._relabel_all([entry])
-            screen._apply_filter("")
             option_list = screen.query_one("#image-list", OptionList)
             option_list.highlighted = 0
             await pilot.pause()

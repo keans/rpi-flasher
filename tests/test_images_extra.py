@@ -21,28 +21,31 @@ def _entry(**overrides) -> ImageEntry:
     return ImageEntry(**defaults)
 
 
-def test_matches_query_empty_matches_everything():
-    assert images.matches_query(_entry(), "") is True
+def test_display_label_is_name_first_with_cache_status():
+    label = images.display_label(
+        _entry(name="Raspberry Pi OS Lite"), cached=True
+    )
+    assert label.startswith("Raspberry Pi OS Lite")
+    assert "Cached" in label
 
 
-def test_matches_query_matches_name():
-    assert images.matches_query(_entry(name="Ubuntu Server"), "ubuntu") is True
+def test_display_label_shows_download_size_when_not_cached():
+    label = images.display_label(
+        _entry(image_download_size=500_000_000), cached=False
+    )
+    assert "Download" in label
+    assert "MB" in label or "GB" in label
 
 
-def test_matches_query_matches_device():
-    assert images.matches_query(_entry(devices=["pi5-64bit"]), "pi5") is True
-    assert images.matches_query(_entry(devices=["pi5-64bit"]), "pi3") is False
-
-
-def test_matches_query_matches_category():
-    entry = _entry(category_path=["Media player OS"])
-    assert images.matches_query(entry, "media") is True
-
-
-def test_display_label_includes_devices():
-    label = images.display_label(_entry(), cached=True)
-    assert "pi5-64bit" in label
-    assert "pi4-64bit" in label
+def test_display_label_omits_category_and_devices():
+    # Both are already implied by the OS-select/device-select steps that
+    # precede this list.
+    label = images.display_label(
+        _entry(category_path=["Media player OS"], devices=["pi5-64bit"]),
+        cached=True,
+    )
+    assert "Media player OS" not in label
+    assert "pi5-64bit" not in label
 
 
 def test_delete_cached_removes_file(tmp_path, monkeypatch):
@@ -59,6 +62,76 @@ def test_delete_cached_removes_file(tmp_path, monkeypatch):
 def test_delete_cached_missing_file_is_a_noop(tmp_path, monkeypatch):
     monkeypatch.setattr(images, "images_dir", lambda: tmp_path)
     images.delete_cached(_entry())  # should not raise
+
+
+def test_unique_devices_dedupes_and_puts_newest_pi_first():
+    entries = [
+        _entry(devices=["pi5-64bit", "pi4-64bit"]),
+        _entry(devices=["pi4-64bit"]),
+        _entry(devices=[]),
+    ]
+    assert images.unique_devices(entries) == ["pi5-64bit", "pi4-64bit"]
+
+
+def test_unique_devices_orders_by_version_then_bits_then_non_pi_last():
+    entries = [
+        _entry(
+            devices=[
+                "pi3-32bit",
+                "pi5-32bit",
+                "pi5-64bit",
+                "pi4-64bit",
+                "opi3-64bit",
+            ]
+        ),
+    ]
+    assert images.unique_devices(entries) == [
+        "pi5-64bit",
+        "pi5-32bit",
+        "pi4-64bit",
+        "pi3-32bit",
+        "opi3-64bit",
+    ]
+
+
+def test_matches_device_matches_declared_device():
+    entry = _entry(devices=["pi5-64bit"])
+    assert images.matches_device(entry, "pi5-64bit") is True
+    assert images.matches_device(entry, "pi4-64bit") is False
+
+
+def test_matches_device_no_devices_matches_anything():
+    entry = _entry(devices=[])
+    assert images.matches_device(entry, "pi5-64bit") is True
+
+
+def test_os_category_merges_top_level_and_other_raspberry_pi_os():
+    # The flagship desktop build is a top-level entry (no category_path);
+    # its Lite/Full variants are filed under "Raspberry Pi OS (other)".
+    # Both must land in one family so choosing it offers the full lineup.
+    desktop = _entry(category_path=[])
+    lite = _entry(category_path=["Raspberry Pi OS (other)"])
+    assert images.os_category(desktop) == "Raspberry Pi OS"
+    assert images.os_category(lite) == "Raspberry Pi OS"
+    assert images.unique_categories([desktop, lite]) == ["Raspberry Pi OS"]
+
+
+def test_unique_categories_pins_raspberry_pi_os_first():
+    entries = [
+        _entry(category_path=["Media player OS"]),
+        _entry(category_path=["Other general-purpose OS"]),
+        _entry(category_path=[]),
+    ]
+    assert images.unique_categories(entries) == [
+        "Raspberry Pi OS",
+        "Media player OS",
+        "Other general-purpose OS",
+    ]
+
+
+def test_os_category_keeps_unrelated_categories_distinct():
+    entry = _entry(category_path=["Media player OS"])
+    assert images.os_category(entry) == "Media player OS"
 
 
 def test_cache_size_bytes_sums_img_files(tmp_path, monkeypatch):

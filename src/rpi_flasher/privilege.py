@@ -26,6 +26,13 @@ def ensure_root() -> None:
     """
     if is_root():
         return
+    print(
+        "rpi-flasher needs administrator access to write the selected SD "
+        "card. sudo will ask for your macOS password now. If writing is "
+        "later denied, grant this terminal Full Disk Access in System "
+        "Settings > Privacy & Security.",
+        file=sys.stderr,
+    )
     try:
         os.execvp(
             "sudo",

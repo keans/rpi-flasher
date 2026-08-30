@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
+import asyncio
 import json
+import re
 from pathlib import Path
 
 import httpx
@@ -128,30 +130,86 @@ def cache_size_bytes() -> int:
 
 
 def display_label(entry: ImageEntry, *, cached: bool) -> str:
-    """Format a selectable row label. `cached` is passed in rather than
-    recomputed here, since callers (e.g. a filterable list re-rendered on
-    every keystroke) should stat each cache file once, not per render."""
-    prefix = (
-        f"[{' / '.join(entry.category_path)}] " if entry.category_path else ""
+    """Format a selectable row label, name-first so the list reads like a
+    menu rather than a stack of status tags. `cached` is passed in rather
+    than recomputed here, since callers (e.g. a filterable list re-rendered
+    on every keystroke) should stat each cache file once, not per render.
+    Neither the target devices nor the OS category are repeated here since
+    the image list is already narrowed to the chosen Pi model and OS
+    family before this label is shown."""
+    status = (
+        "✓ Cached"
+        if cached
+        else f"⬇ Download {human_bytes(entry.image_download_size)}"
     )
-    if cached:
-        status = "[Cached]"
-    else:
-        status = f"[Download {human_bytes(entry.image_download_size)}]"
-    devices = f" ({', '.join(entry.devices)})" if entry.devices else ""
-    return f"{status} {prefix}{entry.name}{devices}"
+    return f"{entry.name} -- {status}"
 
 
-def matches_query(entry: ImageEntry, query: str) -> bool:
-    """Substring match used by the image list's filter box, covering name,
-    category, and target device (e.g. typing "pi5" narrows to images that
-    declare compatibility with a Pi 5)."""
-    query = query.lower().strip()
-    if not query:
-        return True
-    haystacks = [
-        entry.name.lower(),
-        " ".join(entry.category_path).lower(),
-        " ".join(entry.devices).lower(),
-    ]
-    return any(query in h for h in haystacks)
+async def fetch_entries() -> tuple[list[ImageEntry], str]:
+    """Fetch and flatten the OS list, falling back to the last cached
+    snapshot on network failure. Returns (entries, status) where status is
+    empty after a clean live fetch, or an explanatory message if the
+    fallback snapshot was used instead. Raises ImageListError if the fetch
+    fails and there's no usable snapshot to fall back to."""
+    try:
+        data = await fetch_os_list()
+        return flatten_os_list(data.get("os_list", [])), ""
+    except httpx.HTTPError as exc:
+        snapshot = await asyncio.to_thread(load_snapshot)
+        if snapshot is None:
+            raise ImageListError(str(exc)) from exc
+        return (
+            flatten_os_list(snapshot.get("os_list", [])),
+            f"Live fetch failed ({exc}); showing last cached list.",
+        )
+
+
+# Matches the feed's Raspberry Pi device ids (e.g. "pi5-64bit",
+# "pi4-32bit") but not other boards' ids that happen to contain "pi" as a
+# substring (e.g. "opi3-64bit" for Orange Pi 3).
+_PI_DEVICE_RE = re.compile(r"^pi(\d+)-(\d+)bit$")
+
+
+def _device_sort_key(device: str) -> tuple[int, int, int, str]:
+    match = _PI_DEVICE_RE.match(device)
+    if match is None:
+        # Non-Pi boards sort after all Raspberry Pi models, alphabetically.
+        return (1, 0, 0, device)
+    version, bits = int(match.group(1)), int(match.group(2))
+    return (0, -version, -bits, device)
+
+
+def unique_devices(entries: list[ImageEntry]) -> list[str]:
+    """All distinct Pi models referenced across the entries' `devices`
+    lists, for the device-select step -- newest Raspberry Pi model first."""
+    devices = {device for entry in entries for device in entry.devices}
+    return sorted(devices, key=_device_sort_key)
+
+
+def matches_device(entry: ImageEntry, device: str) -> bool:
+    """An entry with no declared devices is treated as device-agnostic
+    (e.g. general-purpose tools), so it matches any model."""
+    return not entry.devices or device in entry.devices
+
+
+def os_category(entry: ImageEntry) -> str:
+    """Top-level OS family for the OS-select step. Top-level feed entries
+    (the main Raspberry Pi OS desktop builds) have no category_path at
+    all, while their Lite/Full variants are filed a level down under a
+    separate "Raspberry Pi OS (other)" category -- both are grouped under
+    one "Raspberry Pi OS" family here so choosing it offers the full
+    Full/Lite/Legacy lineup instead of just the single top-level desktop
+    build. Everything else keeps its own top-level category (e.g. "Media
+    player OS")."""
+    top = entry.category_path[0] if entry.category_path else "Raspberry Pi OS"
+    return "Raspberry Pi OS" if top.startswith("Raspberry Pi OS") else top
+
+
+def unique_categories(entries: list[ImageEntry]) -> list[str]:
+    """Distinct OS families, with "Raspberry Pi OS" pinned first since
+    it's the overwhelmingly common choice; everything else alphabetical."""
+    categories = {os_category(e) for e in entries}
+    rest = sorted(categories - {"Raspberry Pi OS"})
+    return (
+        ["Raspberry Pi OS"] if "Raspberry Pi OS" in categories else []
+    ) + rest

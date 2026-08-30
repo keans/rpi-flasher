@@ -6,23 +6,33 @@ Raspberry Pi Imager but keyboard-driven.
 
 ## Wizard flow
 
-1. **Select SD card** — lists SD cards detected via `diskutil` (internal
-   disks and non-SD external drives like USB HDDs are filtered out).
-2. **Select image** — browses the official Raspberry Pi Imager OS feed,
-   showing which images are already cached locally vs. need downloading.
-3. **Options** — toggle SSH, WLAN (SSID/password/country), and whether to
-   delete the downloaded image after a successful flash. SSH/WLAN
-   preferences are remembered for next time in
-   `~/.config/rpi-flasher/config.json` (plaintext, `0600` permissions —
-   there's no keychain integration in this version).
-4. **Overview** — summarizes your choices; you must type the exact device
-   path (e.g. `/dev/disk4`) to arm the flash button, since this is a
+1. **Select disk** — lists removable media detected via `diskutil`
+   (internal disks and fixed external drives like USB HDDs are filtered
+   out).
+2. **Select Pi model** — lists every Raspberry Pi model referenced by the
+   official OS feed; picking one narrows down to images built for it.
+3. **Select OS** — lists the OS families available for that model (e.g.
+   "Raspberry Pi OS", "Media player OS", "Other general-purpose OS").
+4. **Select image** — browses/searches the images in the chosen family,
+   showing which are already cached locally vs. need downloading. Steps 3
+   and 4 are skipped automatically whenever a narrowing choice leaves only
+   one possible image — straight to Options in that case.
+5. **Options** — toggle SSH, WLAN, and whether to delete the downloaded
+   image after a successful flash.
+6. **WLAN details** — (only shown if WLAN setup was checked) SSID,
+   password, and a two-letter country code. SSH/WLAN preferences can
+   optionally be remembered in `~/.config/rpi-flasher/config.json`
+   (plaintext with `0600` permissions; saving the password is opt-in).
+7. **Overview** — summarizes your choices behind a Yes/No confirmation
+   (defaulting to "No") before arming the flash, since this is a
    destructive operation.
-5. **Flash** — unmounts the card, downloads/verifies/decompresses the
+8. **Flash** — unmounts the card, downloads/verifies/decompresses the
    image on the fly (cached under `~/.cache/rpi-flasher/`), writes it to
    the raw device with live progress, applies SSH/WLAN customization to
    the boot partition (`wpa_supplicant.conf` for legacy images,
    `custom.toml` for Bookworm+ cloud-init images), then ejects.
+
+Press `q` on any screen to quit.
 
 ## Requirements
 

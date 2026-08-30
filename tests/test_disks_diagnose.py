@@ -18,6 +18,7 @@ def test_diagnose_disks_explains_each_exclusion_reason(monkeypatch):
             return {
                 "Internal": False,
                 "WritableMedia": True,
+                "RemovableMedia": False,
                 "BusProtocol": "USB",
                 "MediaName": "External USB SSD",
             }
@@ -27,23 +28,22 @@ def test_diagnose_disks_explains_each_exclusion_reason(monkeypatch):
     messages = disks.diagnose_disks()
 
     assert any("disk0" in m and "internal disk" in m for m in messages)
-    assert any(
-        "disk4" in m and "not recognized as an SD card" in m for m in messages
-    )
+    assert any("disk4" in m and "not removable media" in m for m in messages)
 
 
-def test_diagnose_disks_reports_recognized_sd_card(monkeypatch):
+def test_diagnose_disks_reports_recognized_removable_disk(monkeypatch):
     def fake_run_plist(args):
         if args[:2] == ["diskutil", "list"]:
             return {"WholeDisks": ["disk5"]}
         return {
             "Internal": False,
             "WritableMedia": True,
-            "BusProtocol": "Secure Digital",
-            "MediaName": "SD Card",
+            "RemovableMedia": True,
+            "BusProtocol": "USB",
+            "MediaName": "MassStorageClass",
         }
 
     monkeypatch.setattr(disks, "_run_plist", fake_run_plist)
     messages = disks.diagnose_disks()
 
-    assert messages == ["/dev/disk5: recognized as an SD card"]
+    assert messages == ["/dev/disk5: recognized as removable media"]
