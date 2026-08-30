@@ -400,11 +400,14 @@ def _flash_inner(
         # The image itself is already flashed correctly at this point;
         # a customization failure (card removed, boot partition slow to
         # remount) is reported but shouldn't fail the whole flash.
+        customization_warnings: list[str] = []
         skip_reason = disks.best_effort(
-            lambda: boot_customize.apply(
-                disks.find_boot_partition_mountpoint(disk.device_node),
-                image,
-                options,
+            lambda: customization_warnings.extend(
+                boot_customize.apply(
+                    disks.find_boot_partition_mountpoint(disk.device_node),
+                    image,
+                    options,
+                )
             )
         )
         if skip_reason:
@@ -416,6 +419,8 @@ def _flash_inner(
                     warning=True,
                 )
             )
+        for warning in customization_warnings:
+            progress_cb(FlashProgress(warning, 0, 1, warning=True))
 
     if options.delete_image_after_flash:
         progress_cb(FlashProgress("Deleting cached image", 0, 1))

@@ -44,6 +44,25 @@ def test_empty_ssid_is_rejected(tmp_path, monkeypatch):
     assert "SSID is required" in screen._validation_error
 
 
+def test_non_iso_country_code_is_rejected(tmp_path, monkeypatch):
+    # "UK" is a common mistake for the United Kingdom's actual ISO/Wi-Fi
+    # regulatory code, "GB" -- raspi-config's do_wifi_country rejects it
+    # on the Pi and never unblocks rfkill, silently leaving Wi-Fi radio-
+    # blocked with no visible error, so this must be caught here instead.
+    monkeypatch.setattr(config, "invoking_user_home", lambda: str(tmp_path))
+
+    app = RpiFlasherApp()
+    screen = WlanDetailsScreen(FlashOptions(setup_wlan=True))
+    app.push_screen(screen)
+
+    screen.ssid_field._lines = ["home"]
+    screen.country_field._lines = ["UK"]
+    screen.next()
+
+    assert app.screen is screen
+    assert "ISO Wi-Fi regulatory code" in screen._validation_error
+
+
 def test_filling_details_saves_and_advances_to_overview(tmp_path, monkeypatch):
     monkeypatch.setattr(config, "invoking_user_home", lambda: str(tmp_path))
 

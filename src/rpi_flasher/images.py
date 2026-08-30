@@ -205,6 +205,55 @@ def os_category(entry: ImageEntry) -> str:
     return "Raspberry Pi OS" if top.startswith("Raspberry Pi OS") else top
 
 
+# The feed's `init_format: "cloudinit-rpi"` is used identically for both
+# Bookworm (bespoke raspberrypi-sys-mods custom.toml) and Trixie+ (real
+# upstream cloud-init with a NoCloud datasource, which never reads
+# custom.toml at all) -- the field doesn't distinguish them. The image
+# filename does, embedding the Debian codename directly (e.g.
+# ".../2026-06-18-raspios-trixie-arm64.img.xz").
+_CODENAME_RE = re.compile(r"raspios-([a-z]+)-")
+
+# Codenames confirmed (by reading RPi-Distro/rpi-cloud-init-mods) to use
+# real cloud-init instead of custom.toml.
+REAL_CLOUDINIT_CODENAMES = frozenset({"trixie"})
+# Codenames confirmed to still use the legacy custom.toml mechanism.
+LEGACY_CUSTOM_TOML_CODENAMES = frozenset({"bookworm"})
+
+
+def image_codename(entry: ImageEntry) -> str | None:
+    match = _CODENAME_RE.search(entry.url)
+    return match.group(1) if match else None
+
+
+def uses_real_cloudinit(entry: ImageEntry) -> bool:
+    """True only for codenames explicitly confirmed to use real cloud-init.
+
+    An unrecognized or absent codename intentionally falls back to False
+    (the legacy custom.toml path) rather than guessing -- assuming a
+    brand-new naming scheme means "the newer format" without verifying it
+    would silently write a file nothing reads, exactly the bug this
+    distinction exists to avoid.
+    """
+    return image_codename(entry) in REAL_CLOUDINIT_CODENAMES
+
+
+def unrecognized_cloudinit_codename(entry: ImageEntry) -> str | None:
+    """The image's codename, if it claims `cloudinit-rpi` but is neither a
+    known real-cloud-init release nor the known legacy custom.toml release
+    -- signals that the custom.toml fallback below is an unverified guess,
+    not a confirmed match, so callers can surface a warning."""
+    if entry.init_format != "cloudinit-rpi":
+        return None
+    codename = image_codename(entry)
+    if (
+        codename is None
+        or codename in REAL_CLOUDINIT_CODENAMES
+        or codename in LEGACY_CUSTOM_TOML_CODENAMES
+    ):
+        return None
+    return codename
+
+
 def unique_categories(entries: list[ImageEntry]) -> list[str]:
     """Distinct OS families, with "Raspberry Pi OS" pinned first since
     it's the overwhelmingly common choice; everything else alphabetical."""

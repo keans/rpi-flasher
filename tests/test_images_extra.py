@@ -21,6 +21,70 @@ def _entry(**overrides) -> ImageEntry:
     return ImageEntry(**defaults)
 
 
+def test_image_codename_extracts_from_url():
+    entry = _entry(
+        url=(
+            "https://downloads.raspberrypi.com/raspios_arm64/images/"
+            "raspios_arm64-2026-06-19/2026-06-18-raspios-trixie-arm64.img.xz"
+        )
+    )
+    assert images.image_codename(entry) == "trixie"
+
+
+def test_image_codename_none_when_not_a_raspios_filename():
+    entry = _entry(url="https://example.com/some-other-image.img.xz")
+    assert images.image_codename(entry) is None
+
+
+def test_uses_real_cloudinit_true_only_for_trixie():
+    trixie = _entry(
+        url="https://example.com/2026-06-18-raspios-trixie-arm64.img.xz"
+    )
+    bookworm = _entry(
+        url="https://example.com/2025-01-01-raspios-bookworm-arm64.img.xz"
+    )
+    assert images.uses_real_cloudinit(trixie) is True
+    assert images.uses_real_cloudinit(bookworm) is False
+
+
+def test_uses_real_cloudinit_false_for_unrecognized_codename():
+    # An unrecognized/future codename must NOT be assumed to be the
+    # newer format -- that would silently write files nothing reads.
+    future = _entry(
+        url="https://example.com/2027-01-01-raspios-forky-arm64.img.xz"
+    )
+    assert images.uses_real_cloudinit(future) is False
+
+
+def test_unrecognized_cloudinit_codename_flags_unknown_codename():
+    future = _entry(
+        init_format="cloudinit-rpi",
+        url="https://example.com/2027-01-01-raspios-forky-arm64.img.xz",
+    )
+    assert images.unrecognized_cloudinit_codename(future) == "forky"
+
+
+def test_unrecognized_cloudinit_codename_none_for_known_codenames():
+    bookworm = _entry(
+        init_format="cloudinit-rpi",
+        url="https://example.com/2025-01-01-raspios-bookworm-arm64.img.xz",
+    )
+    trixie = _entry(
+        init_format="cloudinit-rpi",
+        url="https://example.com/2026-06-18-raspios-trixie-arm64.img.xz",
+    )
+    assert images.unrecognized_cloudinit_codename(bookworm) is None
+    assert images.unrecognized_cloudinit_codename(trixie) is None
+
+
+def test_unrecognized_cloudinit_codename_none_when_not_cloudinit_rpi():
+    future = _entry(
+        init_format="systemd",
+        url="https://example.com/2027-01-01-raspios-forky-arm64.img.xz",
+    )
+    assert images.unrecognized_cloudinit_codename(future) is None
+
+
 def test_display_label_is_name_first_with_cache_status():
     label = images.display_label(
         _entry(name="Raspberry Pi OS Lite"), cached=True

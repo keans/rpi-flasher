@@ -16,7 +16,7 @@ from rpi_flasher.screens._widgets import (
 from rpi_flasher.screens.base import Screen
 from rpi_flasher.state import FlashOptions, WlanConfig, finish_options
 from rpi_flasher.theme import make_hint_label, make_step_label
-from rpi_flasher.utils import STEP_WLAN_DETAILS
+from rpi_flasher.utils import STEP_WLAN_DETAILS, valid_wifi_country
 
 DEFAULT_COUNTRY = "DE"
 
@@ -90,10 +90,12 @@ class WlanDetailsScreen(Screen):
             return
 
         country = self.country_field.value.strip().upper()
-        if len(country) != 2 or not country.isalpha():
+        if not valid_wifi_country(country):
             self.set_error(
                 self._validation_label,
-                "Country must be a 2-letter ISO code, such as DE, US, or GB.",
+                "Country must be a real ISO Wi-Fi regulatory code, such as "
+                "DE, US, or GB (not, for example, UK) -- an invalid code "
+                "leaves Wi-Fi radio-blocked on first boot.",
             )
             return
 
@@ -108,7 +110,7 @@ class WlanDetailsScreen(Screen):
     def store_selection(self) -> None:
         ssid = self.ssid_field.value.strip()
         country = self.country_field.value.strip().upper()
-        if not ssid or len(country) != 2 or not country.isalpha():
+        if not ssid or not valid_wifi_country(country):
             return
         self._pending_options.wlan = WlanConfig(
             ssid=ssid,

@@ -30,6 +30,47 @@ if TYPE_CHECKING:
     from rpi_flasher.screens.base import Screen
 
 
+def _split_keys(data: str) -> list[str]:
+    """Split a raw burst of terminal input into individual key tokens.
+
+    PyTermGUI's low-level reader (`_GetchUnix`) drains every byte the OS
+    has buffered in one read and returns it as a single string; typing
+    at any normal pace between our 50ms polls reliably produces
+    multi-character bursts (very common while typing a password
+    continuously). Widgets only handle one key per `handle_key()` call,
+    and a multi-character burst matches neither a bound escape sequence
+    nor the single-printable-character path -- it's silently dropped in
+    its entirety, which is what "loses keys" while typing fast. Escape
+    sequences (arrow/function keys, `"\\x1b..."`) must stay intact as one
+    token; every other character is its own key.
+    """
+    tokens: list[str] = []
+    i = 0
+    while i < len(data):
+        if data[i] != "\x1b":
+            tokens.append(data[i])
+            i += 1
+            continue
+
+        if data[i:].startswith("\x1b["):
+            # CSI sequence (arrows, shift/ctrl variants, F5-F12): ESC '['
+            # then parameter bytes, ending at the first byte in '@'-'~'.
+            j = i + 2
+            while j < len(data) and not ("@" <= data[j] <= "~"):
+                j += 1
+            j = min(j + 1, len(data))
+        elif data[i:].startswith("\x1bO"):
+            # SS3 sequence (F1-F4): always exactly ESC 'O' <letter>.
+            j = min(i + 3, len(data))
+        else:
+            # Bare ESC, or an Alt+key combo (ESC followed by one char).
+            j = min(i + 2, len(data))
+
+        tokens.append(data[i:j])
+        i = j
+    return tokens
+
+
 class RpiFlasherWindowManager(ptg.WindowManager):
     """Window manager with a small main-thread callback queue.
 
@@ -78,15 +119,16 @@ class RpiFlasherWindowManager(ptg.WindowManager):
             while self._is_running:
                 self.process_pending_callbacks()
                 self._process_due_callbacks()
-                key = getch_timeout(0.05, default="", interrupts=False)
-                if not key:
+                raw = getch_timeout(0.05, default="", interrupts=False)
+                if not raw:
                     continue
-                if key == chr(3):
-                    self.interrupt_handler()
-                    continue
-                if self.handle_key(key):
-                    continue
-                self.process_mouse(key)
+                for key in _split_keys(raw):
+                    if key == chr(3):
+                        self.interrupt_handler()
+                        continue
+                    if self.handle_key(key):
+                        continue
+                    self.process_mouse(key)
 
 
 class RpiFlasherApp:

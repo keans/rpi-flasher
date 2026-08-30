@@ -135,13 +135,46 @@ The application:
 4. Writes to the corresponding raw device with progress reporting.
 5. Remounts and customizes the boot partition when requested.
 6. Writes `userconf.txt` with the username and salted password hash for
-   compatible Raspberry Pi OS images.
-7. Writes `wpa_supplicant.conf` for legacy images or `custom.toml` for newer
-   cloud-init images.
+   compatible Raspberry Pi OS images. This works unchanged on every
+   Raspberry Pi OS release, including Trixie, via the separate
+   `userconf-pi` package.
+7. Writes WLAN configuration in the format the image actually reads (see
+   "Wi-Fi configuration format" below): `wpa_supplicant.conf` for legacy
+   images, `custom.toml` for Bookworm-era cloud-init-style images, or
+   cloud-init's own `network-config` for Trixie and newer.
 8. Ejects the card.
 
 Non-fatal customization or eject problems remain visible on the completion
 screen instead of being hidden by a generic success message.
+
+## Wi-Fi configuration format
+
+The OS feed's `init_format` field reports the same value
+(`"cloudinit-rpi"`) for both Bookworm and Trixie+ Raspberry Pi OS builds,
+even though the underlying mechanism is completely different between them:
+
+- **Bookworm**: `custom.toml` is parsed by `raspberrypi-sys-mods`'
+  `init_config` script during a special early boot.
+- **Trixie and newer**: that script no longer exists. Raspberry Pi OS
+  switched to genuine upstream cloud-init (`RPi-Distro/
+  rpi-cloud-init-mods`, using a `NoCloud` datasource seeded from the boot
+  partition), which has no knowledge of `custom.toml` at all — writing it
+  there would be silently ignored.
+
+Since the feed can't distinguish these, `rpi-flasher` reads the Debian
+codename embedded in the image's download filename (e.g.
+`...-raspios-trixie-arm64.img.xz`) against an explicit list of confirmed
+codenames. An unrecognized or absent codename intentionally falls back to
+the legacy `custom.toml` behavior rather than guessing it's the newer
+format — a completion-screen warning calls this out so it's visible rather
+than a silent guess. If a future Raspberry Pi OS release changes format
+again, its codename needs to be added to `REAL_CLOUDINIT_CODENAMES` (or
+`LEGACY_CUSTOM_TOML_CODENAMES`) in `images.py`.
+
+On Trixie+ images, Wi-Fi may not come up after the very first boot even
+though `network-config` was applied correctly -- a second reboot has been
+observed to resolve this. If Wi-Fi isn't online after first boot, try
+rebooting the Pi once more before assuming the configuration didn't take.
 
 ## Development
 
