@@ -1,55 +1,65 @@
-"""Third wizard screen: pick an image from the ones compatible with the
+"""Fourth wizard screen: pick an image from the ones compatible with the
 chosen Pi model and OS family -- already a short list by this point, so
 it's a plain pick-from-a-list screen rather than a searchable one."""
 
 from __future__ import annotations
 
-from typing import ClassVar
+import pytermgui as ptg
 
-from textual.app import ComposeResult
-from textual.containers import Container
-from textual.screen import Screen
-from textual.widgets import Footer, Header, OptionList, Static
-from textual.widgets.option_list import Option
-
-from rpi_flasher import images
+from rpi_flasher import WINDOW_TITLE, images
+from rpi_flasher.screens._listbox import build_listbox
+from rpi_flasher.screens._widgets import make_list_container
+from rpi_flasher.screens.base import Screen
 from rpi_flasher.state import ImageEntry, wizard_state
-from rpi_flasher.utils import STEP_IMAGE, human_bytes, step_title
+from rpi_flasher.theme import make_step_label
+from rpi_flasher.utils import STEP_IMAGE, human_bytes
 
 
 class ImageSelectScreen(Screen):
-    BINDINGS: ClassVar = [
-        ("escape", "app.pop_screen", "Back"),
-        ("d", "delete_cached", "Delete cached copy"),
-    ]
-
     def __init__(self, entries: list[ImageEntry]) -> None:
-        super().__init__()
         self._entries = entries
+        self._status = self._cache_usage_message()
+        self._status_label = ptg.Label(self._status)
+        self._list_container = make_list_container()
 
-    def compose(self) -> ComposeResult:
-        yield Header()
-        yield Container(
-            Static(step_title(STEP_IMAGE), id="title"),
-            Static(self._cache_usage_message(), id="status"),
-            OptionList(id="image-list"),
-            Static("", id="detail"),
-            id="image-select-body",
+    def build(self) -> ptg.Window:
+        self._render()
+        window = ptg.Window(
+            make_step_label(STEP_IMAGE),
+            ptg.Label(""),
+            self._status_label,
+            ptg.Label(""),
+            self._list_container,
+            box="DOUBLE",
         )
-        yield Footer()
+        window.set_title(WINDOW_TITLE)
+        window.bind("d", lambda *_: self.delete_selected(), "Delete cache")
+        return window
 
     def on_mount(self) -> None:
-        self._refresh_options()
-        option_list = self.query_one("#image-list", OptionList)
-        option_list.highlighted = 0
-        option_list.focus()
+        preferred = self.app.saved_selections.image_id
+        index = self.preferred_index(
+            self._entries,
+            preferred,
+            key=lambda entry: entry.extract_sha256 or entry.url,
+        )
+        if self.window is not None and self._entries:
+            self.window.select(index)
 
-    def _refresh_options(self) -> None:
-        option_list = self.query_one("#image-list", OptionList)
-        option_list.clear_options()
-        for entry in self._entries:
-            label = images.display_label(entry, cached=images.is_cached(entry))
-            option_list.add_option(Option(label))
+    def store_selection(self) -> None:
+        selected = self.selected_item(self._entries)
+        if selected is not None:
+            wizard_state(self).image = selected
+
+    def _render(self) -> None:
+        labels = [
+            images.display_label(entry, cached=images.is_cached(entry))
+            for entry in self._entries
+        ]
+        self._list_container.set_widgets(
+            build_listbox(labels, self.select_image)
+        )
+        self.select_first()
 
     def _cache_usage_message(self) -> str:
         size = images.cache_size_bytes()
@@ -60,38 +70,28 @@ class ImageSelectScreen(Screen):
             "Highlight an entry and press 'd' to delete its cache."
         )
 
-    def on_option_list_option_highlighted(
-        self, event: OptionList.OptionHighlighted
-    ) -> None:
-        index = event.option_index
-        detail = self.query_one("#detail", Static)
-        if index is None or not (0 <= index < len(self._entries)):
-            detail.update("")
+    def select_image(self, index: int) -> None:
+        if not (0 <= index < len(self._entries)):
             return
-        detail.update(self._entries[index].description)
+        wizard_state(self).image = self._entries[index]
 
-    def on_option_list_option_selected(
-        self, event: OptionList.OptionSelected
-    ) -> None:
-        index = event.option_index
-        if 0 <= index < len(self._entries):
-            wizard_state(self).image = self._entries[index]
-            from rpi_flasher.screens.options import OptionsScreen
+        from rpi_flasher.screens.options import OptionsScreen
 
-            self.app.push_screen(OptionsScreen())
+        self.app.push_screen(OptionsScreen())
 
-    def action_delete_cached(self) -> None:
-        option_list = self.query_one("#image-list", OptionList)
-        index = option_list.highlighted
-        if index is None or not (0 <= index < len(self._entries)):
+    def delete_cached(self, index: int) -> None:
+        if not (0 <= index < len(self._entries)):
             return
         entry = self._entries[index]
         if not images.is_cached(entry):
             return
         images.delete_cached(entry)
 
-        self._refresh_options()
-        option_list.highlighted = index
-        self.query_one("#status", Static).update(
-            f"Deleted cached copy of {entry.name}."
-        )
+        self._render()
+        self._status = f"Deleted cached copy of {entry.name}."
+        self._status_label.value = ptg.escape_markup(self._status)
+
+    def delete_selected(self) -> None:
+        if self.window is None or self.window.selected_index is None:
+            return
+        self.delete_cached(self.window.selected_index)

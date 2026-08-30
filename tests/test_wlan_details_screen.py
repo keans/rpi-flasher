@@ -1,7 +1,3 @@
-import asyncio
-
-from textual.widgets import Checkbox, Input
-
 from rpi_flasher import config
 from rpi_flasher.app import RpiFlasherApp
 from rpi_flasher.screens.overview import OverviewScreen
@@ -28,65 +24,55 @@ def _entry() -> ImageEntry:
 def test_country_defaults_to_germany(tmp_path, monkeypatch):
     monkeypatch.setattr(config, "invoking_user_home", lambda: str(tmp_path))
 
-    async def run():
-        app = RpiFlasherApp()
-        async with app.run_test() as pilot:
-            await pilot.pause()
-            screen = WlanDetailsScreen(FlashOptions(setup_wlan=True))
-            app.push_screen(screen)
-            await pilot.pause()
-            assert screen.query_one("#wlan-country", Input).value == "DE"
+    app = RpiFlasherApp()
+    screen = WlanDetailsScreen(FlashOptions(setup_wlan=True))
+    app.push_screen(screen)
 
-    asyncio.run(run())
+    assert screen.country_field.value == "DE"
 
 
 def test_empty_ssid_is_rejected(tmp_path, monkeypatch):
     monkeypatch.setattr(config, "invoking_user_home", lambda: str(tmp_path))
 
-    async def run():
-        app = RpiFlasherApp()
-        async with app.run_test() as pilot:
-            await pilot.pause()
-            screen = WlanDetailsScreen(FlashOptions(setup_wlan=True))
-            app.push_screen(screen)
-            await pilot.pause()
+    app = RpiFlasherApp()
+    screen = WlanDetailsScreen(FlashOptions(setup_wlan=True))
+    app.push_screen(screen)
 
-            screen.query_one("#next-button").press()
-            await pilot.pause()
+    screen.next()
 
-            assert isinstance(app.screen, WlanDetailsScreen)
-            assert "SSID is required" in str(
-                screen.query_one("#validation-error").render()
-            )
-
-    asyncio.run(run())
+    assert app.screen is screen
+    assert "SSID is required" in screen._validation_error
 
 
 def test_filling_details_saves_and_advances_to_overview(tmp_path, monkeypatch):
     monkeypatch.setattr(config, "invoking_user_home", lambda: str(tmp_path))
 
-    async def run():
-        app = RpiFlasherApp()
-        app.state.disk = DiskInfo("/dev/disk9", "/dev/rdisk9", 100, [])
-        app.state.image = _entry()
-        async with app.run_test() as pilot:
-            await pilot.pause()
-            screen = WlanDetailsScreen(FlashOptions(setup_wlan=True))
-            app.push_screen(screen)
-            await pilot.pause()
+    app = RpiFlasherApp()
+    app.state.disk = DiskInfo("/dev/disk9", "/dev/rdisk9", 100, [])
+    app.state.image = _entry()
+    screen = WlanDetailsScreen(FlashOptions(setup_wlan=True))
+    app.push_screen(screen)
 
-            screen.query_one("#wlan-ssid", Input).value = "home"
-            screen.query_one("#wlan-country", Input).value = "US"
-            screen.query_one("#remember-wlan", Checkbox).value = True
-            await pilot.pause()
-            screen.query_one("#next-button").press()
-            await pilot.pause()
+    screen.ssid_field._lines = ["home"]
+    screen.country_field._lines = ["US"]
+    screen.remember_box.checked = True
+    screen.next()
 
-            assert isinstance(app.screen, OverviewScreen)
-            assert app.state.options.wlan.ssid == "home"
-            assert app.state.options.wlan.country == "US"
+    assert isinstance(app.screen, OverviewScreen)
+    assert app.state.options.wlan.ssid == "home"
+    assert app.state.options.wlan.country == "US"
 
-            prefs = config.load_preferences()
-            assert prefs.wlan.country == "US"
+    prefs = config.load_preferences()
+    assert prefs.wlan.country == "US"
 
-    asyncio.run(run())
+
+def test_tab_jumps_to_next_button(tmp_path, monkeypatch):
+    monkeypatch.setattr(config, "invoking_user_home", lambda: str(tmp_path))
+    app = RpiFlasherApp()
+    screen = WlanDetailsScreen(FlashOptions(setup_wlan=True))
+    app.push_screen(screen)
+
+    app.manager.handle_key("\t")
+
+    assert screen.window is not None
+    assert screen.window.selected is screen.next_button

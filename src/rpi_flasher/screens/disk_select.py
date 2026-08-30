@@ -2,92 +2,99 @@
 
 from __future__ import annotations
 
-import asyncio
-from typing import ClassVar
+import pytermgui as ptg
 
-from textual.app import ComposeResult
-from textual.containers import Container
-from textual.screen import Screen
-from textual.widgets import DataTable, Footer, Header, LoadingIndicator, Static
-
-from rpi_flasher import disks
+from rpi_flasher import WINDOW_TITLE, disks
+from rpi_flasher.screens._listbox import build_listbox
+from rpi_flasher.screens._widgets import make_list_container
+from rpi_flasher.screens.base import Screen
 from rpi_flasher.state import DiskInfo, wizard_state
-from rpi_flasher.utils import STEP_DISK, human_bytes, step_title
+from rpi_flasher.theme import make_hint_label, make_step_label
+from rpi_flasher.utils import STEP_DISK, human_bytes
 
 
 class DiskSelectScreen(Screen):
-    BINDINGS: ClassVar = [("r", "rescan", "Rescan")]
-
     def __init__(self) -> None:
-        super().__init__()
         self._disks: list[DiskInfo] = []
+        self._status_label = ptg.Label("")
+        self._list_container = make_list_container()
 
-    def compose(self) -> ComposeResult:
-        yield Header()
-        yield Container(
-            Static(step_title(STEP_DISK), id="title"),
-            Static(
-                "Insert an SD card, then select it with the arrow keys and Enter.",
-                classes="hint",
+    def build(self) -> ptg.Window:
+        window = ptg.Window(
+            make_step_label(STEP_DISK),
+            ptg.Label(""),
+            make_hint_label(
+                "Insert an SD card, then select it and press Enter."
             ),
-            LoadingIndicator(id="scanning"),
-            DataTable(id="disk-table"),
-            Static("", id="empty-state"),
-            id="disk-select-body",
+            ptg.Label(""),
+            self._status_label,
+            self._list_container,
+            box="DOUBLE",
         )
-        yield Footer()
+        window.set_title(WINDOW_TITLE)
+        window.bind("r", lambda *_: self.rescan(), "Rescan")
+        return window
 
     def on_mount(self) -> None:
-        table = self.query_one(DataTable)
-        table.add_columns("Device", "Size", "Volumes")
-        table.cursor_type = "row"
-        self.action_rescan()
+        self.rescan()
 
-    def action_rescan(self) -> None:
-        self.run_worker(self._rescan(), exclusive=True)
-
-    async def _rescan(self) -> None:
-        table = self.query_one(DataTable)
-        empty = self.query_one("#empty-state", Static)
-        loading = self.query_one("#scanning", LoadingIndicator)
-
-        loading.display = True
-        table.display = False
-        empty.display = False
+    def rescan(self) -> None:
         try:
-            self._disks = await asyncio.to_thread(disks.list_external_disks)
+            self._disks = disks.list_external_disks()
         except disks.DiskError as exc:
-            loading.display = False
-            empty.display = True
-            empty.update(f"{exc}\n\nPress 'r' to rescan.")
+            self._disks = []
+            self._render(f"{exc}\n\nPress 'r' to rescan.")
             return
-        loading.display = False
-        table.clear()
 
         if not self._disks:
-            table.display = False
-            empty.display = True
             diagnostics = "\n".join(disks.diagnose_disks())
-            empty.update(
+            status = (
                 "No SD cards found. Insert an SD card and press 'r' to "
                 "rescan.\n\nDiagnostics:\n"
                 + (diagnostics or "(no disks attached)")
             )
+        else:
+            status = ""
+        self._render(status)
+
+    def _render(self, status: str) -> None:
+        self._status_label.value = ptg.escape_markup(status)
+        labels = [
+            f"{d.device_node}  {human_bytes(d.size_bytes)}  "
+            f"{', '.join(d.volume_names) or '(unnamed)'}"
+            for d in self._disks
+        ]
+        self._list_container.set_widgets(
+            build_listbox(labels, self.select_disk)
+        )
+        preferred = self.app.saved_selections.disk_device_node
+        preferred_size = self.app.saved_selections.disk_size_bytes
+        preferred_names = self.app.saved_selections.disk_volume_names
+        index = next(
+            (
+                i
+                for i, disk in enumerate(self._disks)
+                if disk.device_node == preferred
+                and preferred_size is not None
+                and disk.size_bytes == preferred_size
+                and preferred_names is not None
+                and tuple(disk.volume_names) == preferred_names
+            ),
+            0,
+        )
+        if self.window is not None and self._disks:
+            self.window.select(index)
+
+    def store_selection(self) -> None:
+        selected = self.selected_item(self._disks)
+        if selected is not None:
+            wizard_state(self).disk = selected
+
+    def select_disk(self, index: int) -> None:
+        if not (0 <= index < len(self._disks)):
             return
+        wizard_state(self).disk = self._disks[index]
 
-        table.display = True
-        empty.display = False
-        for disk in self._disks:
-            table.add_row(
-                disk.device_node,
-                human_bytes(disk.size_bytes),
-                ", ".join(disk.volume_names) or "(unnamed)",
-            )
+        from rpi_flasher.screens.device_select import DeviceSelectScreen
 
-    def on_data_table_row_selected(self, event: DataTable.RowSelected) -> None:
-        index = event.cursor_row
-        if 0 <= index < len(self._disks):
-            wizard_state(self).disk = self._disks[index]
-            from rpi_flasher.screens.device_select import DeviceSelectScreen
-
-            self.app.push_screen(DeviceSelectScreen())
+        self.app.push_screen(DeviceSelectScreen())

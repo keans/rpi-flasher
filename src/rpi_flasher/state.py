@@ -7,7 +7,7 @@ from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, cast
 
 if TYPE_CHECKING:
-    from textual.screen import Screen
+    from rpi_flasher.screens.base import Screen
 
 
 @dataclass
@@ -52,6 +52,8 @@ class FlashOptions:
 @dataclass
 class WizardState:
     disk: DiskInfo | None = None
+    device: str | None = None
+    os_category: str | None = None
     image: ImageEntry | None = None
     options: FlashOptions = field(default_factory=FlashOptions)
 

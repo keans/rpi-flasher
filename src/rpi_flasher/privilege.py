@@ -1,10 +1,11 @@
 """Root elevation handling.
 
-Writing to a raw disk device (/dev/rdiskN) on macOS requires root. Textual
-takes over the terminal (alt-screen, raw mode) once it starts, so an
+Writing to a raw disk device (/dev/rdiskN) on macOS requires root. The
+TUI takes over the terminal (alt-screen, raw mode) once it starts, so an
 interactive `sudo` prompt mid-run is not workable. Instead, if the process
-is not already root, it re-execs itself once through `sudo` before Textual
-ever starts, so the single password prompt happens in a plain terminal.
+is not already root, it re-execs itself once through `sudo` before the
+wizard ever starts, so the single password prompt happens in a plain
+terminal.
 """
 
 from __future__ import annotations

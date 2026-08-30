@@ -1,87 +1,90 @@
-"""WLAN details dialog: SSID/password/country, shown only when WLAN setup
+"""WLAN details screen: SSID/password/country, shown only when WLAN setup
 was requested on the Options screen."""
 
 from __future__ import annotations
 
-from typing import ClassVar
+import pytermgui as ptg
 
-from textual.app import ComposeResult
-from textual.containers import Container
-from textual.screen import Screen
-from textual.widgets import Button, Checkbox, Footer, Header, Input, Static
-
-from rpi_flasher import config
+from rpi_flasher import WINDOW_TITLE, config
+from rpi_flasher.screens._widgets import (
+    CONTROL_ALIGN,
+    MaskedInputField,
+    make_action_button,
+    make_labeled_checkbox,
+)
+from rpi_flasher.screens.base import Screen
 from rpi_flasher.state import FlashOptions, WlanConfig, finish_options
-from rpi_flasher.utils import STEP_WLAN_DETAILS, step_title
+from rpi_flasher.theme import make_hint_label, make_step_label
+from rpi_flasher.utils import STEP_WLAN_DETAILS
 
 DEFAULT_COUNTRY = "DE"
 
 
 class WlanDetailsScreen(Screen):
-    BINDINGS: ClassVar = [("escape", "app.pop_screen", "Back")]
+    blocks_quit_shortcut = True
 
     def __init__(self, pending_options: FlashOptions) -> None:
-        super().__init__()
         self._pending_options = pending_options
 
-    def compose(self) -> ComposeResult:
-        yield Header()
-        yield Container(
-            Static(step_title(STEP_WLAN_DETAILS), id="title"),
-            Static(
-                "Enter the network this Pi should join on first boot.",
-                classes="hint",
-            ),
-            Input(placeholder="SSID", id="wlan-ssid", compact=True),
-            Input(
-                placeholder="Password",
-                password=True,
-                id="wlan-password",
-                compact=True,
-            ),
-            Input(
-                value=DEFAULT_COUNTRY,
-                placeholder="2-letter country code (for example DE or US)",
-                max_length=2,
-                id="wlan-country",
-                compact=True,
-            ),
-            Checkbox(
-                "Remember Wi-Fi password on this Mac (stored in plaintext)",
-                id="remember-wlan",
-                compact=True,
-            ),
-            Static("", id="validation-error"),
-            Button("Next", id="next-button", variant="primary", compact=True),
-            id="wlan-details-body",
-        )
-        yield Footer()
-
-    def on_mount(self) -> None:
-        self.query_one("#validation-error", Static).display = False
         prefs = config.load_preferences()
-        if prefs.wlan:
-            self.query_one("#wlan-ssid", Input).value = prefs.wlan.ssid
-            self.query_one("#wlan-password", Input).value = prefs.wlan.password
-            self.query_one("#wlan-country", Input).value = prefs.wlan.country
-            self.query_one("#remember-wlan", Checkbox).value = True
+        remember_default = prefs.wlan is not None
+        ssid = prefs.wlan.ssid if prefs.wlan else ""
+        password = prefs.wlan.password if prefs.wlan else ""
+        country = prefs.wlan.country if prefs.wlan else DEFAULT_COUNTRY
 
-    def on_button_pressed(self, event: Button.Pressed) -> None:
-        if event.button.id != "next-button":
-            return
+        self.ssid_field = ptg.InputField(
+            ssid, prompt="SSID:     ", parent_align=CONTROL_ALIGN
+        )
+        self.password_field = MaskedInputField(
+            password, prompt="Password: ", parent_align=CONTROL_ALIGN
+        )
+        self.country_field = ptg.InputField(
+            country, prompt="Country:  ", parent_align=CONTROL_ALIGN
+        )
+        self.remember_box = make_labeled_checkbox(
+            "Remember Wi-Fi password on this Mac (stored in plaintext)",
+            checked=remember_default,
+        )
+        self._validation_error = ""
+        self._validation_label = ptg.Label("")
+        self.next_button = make_action_button(
+            "Next", onclick=lambda _: self.next()
+        )
 
-        ssid = self.query_one("#wlan-ssid", Input).value.strip()
+    def build(self) -> ptg.Window:
+        window = ptg.Window(
+            make_step_label(STEP_WLAN_DETAILS),
+            ptg.Label(""),
+            make_hint_label(
+                "Enter the network this Pi should join on first boot."
+            ),
+            ptg.Label(""),
+            self.ssid_field,
+            self.password_field,
+            self.country_field,
+            self.remember_box,
+            self._validation_label,
+            ptg.Label(""),
+            self.next_button,
+            box="DOUBLE",
+        )
+        window.set_title(WINDOW_TITLE)
+        window.bind(
+            ptg.keys.TAB,
+            lambda *_: self.select_widget(self.next_button),
+            "Jump to Next",
+        )
+        return window
+
+    def next(self) -> None:
+        ssid = self.ssid_field.value.strip()
         if not ssid:
-            validation = self.query_one("#validation-error", Static)
-            validation.display = True
-            validation.update("SSID is required when WLAN setup is enabled.")
+            self._set_error("SSID is required when WLAN setup is enabled.")
             return
 
-        country = self.query_one("#wlan-country", Input).value.strip().upper()
+        country = self.country_field.value.strip().upper()
         if len(country) != 2 or not country.isalpha():
-            validation = self.query_one("#validation-error", Static)
-            validation.display = True
-            validation.update(
+            self._set_error(
                 "Country must be a 2-letter ISO code, such as DE, US, or GB."
             )
             return
@@ -89,11 +92,13 @@ class WlanDetailsScreen(Screen):
         options = self._pending_options
         options.wlan = WlanConfig(
             ssid=ssid,
-            password=self.query_one("#wlan-password", Input).value,
+            password=self.password_field.value,
             country=country,
         )
-        finish_options(
-            self,
-            options,
-            remember_wlan=self.query_one("#remember-wlan", Checkbox).value,
+        finish_options(self, options, remember_wlan=self.remember_box.checked)
+
+    def _set_error(self, message: str) -> None:
+        self._validation_error = message
+        self._validation_label.value = (
+            f"[error bold]{ptg.escape_markup(message)}[/]"
         )

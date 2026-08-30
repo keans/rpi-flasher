@@ -20,6 +20,7 @@ from rpi_flasher.privilege import chown_to_invoking_user, ensure_user_owned_dir
 from rpi_flasher.state import WizardState
 
 CHUNK_SIZE = 4 * 1024 * 1024  # 4 MiB
+HTTP_TIMEOUT = httpx.Timeout(connect=15.0, read=60.0, write=30.0, pool=15.0)
 
 
 class FlashError(RuntimeError):
@@ -54,8 +55,8 @@ class FlashProgress:
     phase: str
     current: int
     total: int
-    # True while the phase can still be safely cancelled (no bytes on the
-    # card yet); False once the raw write has started or later.
+    # True while the phase observes the cancellation event. Cancelling a raw
+    # write is supported, but leaves the card incomplete and needing reflash.
     cancellable: bool = False
     # Non-fatal problems that must remain visible on the final success screen.
     warning: bool = False
@@ -95,38 +96,60 @@ def _decompress_zip_file(path: Path) -> Iterator[bytes]:
 
 def _stream_url(url: str) -> Iterator[bytes]:
     with httpx.stream(
-        "GET", url, headers={"User-Agent": images.USER_AGENT}, timeout=None
+        "GET",
+        url,
+        headers={"User-Agent": images.USER_AGENT},
+        timeout=HTTP_TIMEOUT,
     ) as r:
         r.raise_for_status()
         yield from r.iter_bytes(CHUNK_SIZE)
 
 
-def _download_zip_to_temp(url: str, dest_dir: Path) -> Path:
+def _download_zip_to_temp(
+    url: str,
+    dest_dir: Path,
+    cancel_event: threading.Event | None = None,
+) -> Path:
     """Zip needs random access to extract, so buffer the raw download to a
     temp file first; the caller is responsible for deleting it."""
     fd, tmp_path_str = tempfile.mkstemp(dir=dest_dir, prefix=".compressed-")
     tmp_path = Path(tmp_path_str)
-    with (
-        os.fdopen(fd, "wb") as cf,
-        httpx.stream(
-            "GET", url, headers={"User-Agent": images.USER_AGENT}, timeout=None
-        ) as r,
-    ):
-        r.raise_for_status()
-        for chunk in r.iter_bytes(CHUNK_SIZE):
-            cf.write(chunk)
+    try:
+        with (
+            os.fdopen(fd, "wb") as cf,
+            httpx.stream(
+                "GET",
+                url,
+                headers={"User-Agent": images.USER_AGENT},
+                timeout=HTTP_TIMEOUT,
+            ) as r,
+        ):
+            r.raise_for_status()
+            for chunk in r.iter_bytes(CHUNK_SIZE):
+                _check_cancelled(
+                    cancel_event,
+                    "Download cancelled -- no data was written to the "
+                    "SD card, it's safe to retry.",
+                )
+                cf.write(chunk)
+    except Exception:
+        tmp_path.unlink(missing_ok=True)
+        raise
     return tmp_path
 
 
 def _decompressed_chunks(
-    url: str, filename: str, dest_dir: Path
+    url: str,
+    filename: str,
+    dest_dir: Path,
+    cancel_event: threading.Event | None = None,
 ) -> Iterable[bytes]:
     """Dispatch on archive format and return an iterator of decompressed
     bytes -- the one thing that differs between .zip/.xz/.img downloads.
     Everything else (hashing, writing, progress) is handled uniformly by
     the caller."""
     if filename.endswith(".zip"):
-        compressed_path = _download_zip_to_temp(url, dest_dir)
+        compressed_path = _download_zip_to_temp(url, dest_dir, cancel_event)
         try:
             yield from _decompress_zip_file(compressed_path)
         finally:
@@ -195,8 +218,11 @@ def download_and_cache(
 
     try:
         with os.fdopen(fd, "wb") as tmp_file:
+            progress_cb(
+                FlashProgress("Downloading", 0, extract_size, cancellable=True)
+            )
             digest = _hash_stream(
-                _decompressed_chunks(url, filename, dest.parent),
+                _decompressed_chunks(url, filename, dest.parent, cancel_event),
                 extract_size,
                 "Downloading",
                 "Download cancelled -- no data was written to the "
@@ -216,6 +242,10 @@ def download_and_cache(
         chown_to_invoking_user(str(dest))
     except httpx.HTTPError as exc:
         raise DownloadError(f"Download failed: {exc}") from exc
+    except (zipfile.BadZipFile, lzma.LZMAError, EOFError) as exc:
+        raise DownloadError(
+            f"Downloaded image archive is corrupt: {exc}"
+        ) from exc
     finally:
         tmp_path.unlink(missing_ok=True)
 
@@ -277,6 +307,7 @@ def stream_to_raw_disk(
     cancel_event: threading.Event | None = None,
 ) -> None:
     written = 0
+    progress_cb(FlashProgress("Writing", 0, total_size, cancellable=True))
     with (
         cache_path.open("rb") as src,
         open(raw_device_node, "wb", buffering=0) as dst,
@@ -297,7 +328,9 @@ def stream_to_raw_disk(
                 break
             dst.write(chunk)
             written += len(chunk)
-            progress_cb(FlashProgress("Writing", written, total_size))
+            progress_cb(
+                FlashProgress("Writing", written, total_size, cancellable=True)
+            )
         dst.flush()
         os.fsync(dst.fileno())
 

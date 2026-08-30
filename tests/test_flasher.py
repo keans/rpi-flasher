@@ -6,6 +6,7 @@ import pytest
 from rpi_flasher import flasher
 from rpi_flasher.flasher import (
     FlashCancelled,
+    _download_zip_to_temp,
     _ensure_cached_image,
     _url_filename,
     stream_to_raw_disk,
@@ -130,6 +131,29 @@ def test_stream_to_raw_disk_completes_when_not_cancelled(tmp_path):
     assert dst.read_bytes() == data
 
 
+def test_stream_to_raw_disk_can_cancel_after_writing_starts(tmp_path):
+    src = tmp_path / "src.img"
+    total = flasher.CHUNK_SIZE + 10
+    src.write_bytes(b"x" * total)
+    dst = tmp_path / "dst.img"
+    cancel_event = threading.Event()
+
+    def cancel_after_first_chunk(progress):
+        if progress.current > 0:
+            cancel_event.set()
+
+    with pytest.raises(FlashCancelled, match="inconsistent state"):
+        stream_to_raw_disk(
+            src,
+            str(dst),
+            total,
+            cancel_after_first_chunk,
+            cancel_event=cancel_event,
+        )
+
+    assert dst.stat().st_size == flasher.CHUNK_SIZE
+
+
 def test_ensure_cached_image_propagates_cancellation_from_verify(
     tmp_path, monkeypatch
 ):
@@ -155,3 +179,33 @@ def test_ensure_cached_image_propagates_cancellation_from_verify(
             progress_cb=lambda _: None,
             cancel_event=cancel_event,
         )
+
+
+def test_zip_download_observes_cancellation_and_removes_temp_file(
+    tmp_path, monkeypatch
+):
+    class FakeResponse:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *args):
+            return False
+
+        def raise_for_status(self):
+            return None
+
+        def iter_bytes(self, chunk_size):
+            yield b"compressed bytes"
+
+    monkeypatch.setattr(
+        flasher.httpx, "stream", lambda *a, **k: FakeResponse()
+    )
+    cancel_event = threading.Event()
+    cancel_event.set()
+
+    with pytest.raises(FlashCancelled, match="safe to retry"):
+        _download_zip_to_temp(
+            "https://example.com/image.zip", tmp_path, cancel_event
+        )
+
+    assert list(tmp_path.glob(".compressed-*")) == []

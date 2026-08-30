@@ -2,49 +2,54 @@
 
 from __future__ import annotations
 
-from typing import ClassVar
+import pytermgui as ptg
 
-from textual.app import ComposeResult
-from textual.containers import Container
-from textual.screen import Screen
-from textual.widgets import Footer, Header, OptionList, Static
-from textual.widgets.option_list import Option
-
-from rpi_flasher import images
-from rpi_flasher.state import ImageEntry, narrow_or_advance
-from rpi_flasher.utils import STEP_OS, step_title
+from rpi_flasher import WINDOW_TITLE, images
+from rpi_flasher.screens._listbox import build_listbox
+from rpi_flasher.screens._widgets import make_list_container
+from rpi_flasher.screens.base import Screen
+from rpi_flasher.state import ImageEntry, narrow_or_advance, wizard_state
+from rpi_flasher.theme import make_hint_label, make_step_label
+from rpi_flasher.utils import STEP_OS
 
 
 class OsSelectScreen(Screen):
-    BINDINGS: ClassVar = [("escape", "app.pop_screen", "Back")]
-
     def __init__(self, entries: list[ImageEntry]) -> None:
-        super().__init__()
         self._entries = entries
         self._categories = images.unique_categories(entries)
+        self._list_container = make_list_container()
 
-    def compose(self) -> ComposeResult:
-        yield Header()
-        yield Container(
-            Static(step_title(STEP_OS), id="title"),
-            Static("Choose an operating system family.", classes="hint"),
-            OptionList(*(Option(c) for c in self._categories), id="os-list"),
-            id="os-select-body",
+    def build(self) -> ptg.Window:
+        self._list_container.set_widgets(
+            build_listbox(self._categories, self.select_category)
         )
-        yield Footer()
+        window = ptg.Window(
+            make_step_label(STEP_OS),
+            ptg.Label(""),
+            make_hint_label("Choose an operating system family."),
+            ptg.Label(""),
+            self._list_container,
+            box="DOUBLE",
+        )
+        window.set_title(WINDOW_TITLE)
+        return window
 
     def on_mount(self) -> None:
-        option_list = self.query_one("#os-list", OptionList)
-        option_list.highlighted = 0
-        option_list.focus()
+        preferred = self.app.saved_selections.os_category
+        index = self.preferred_index(self._categories, preferred)
+        if self.window is not None and self._categories:
+            self.window.select(index)
 
-    def on_option_list_option_selected(
-        self, event: OptionList.OptionSelected
-    ) -> None:
-        index = event.option_index
-        if index is None or not (0 <= index < len(self._categories)):
+    def store_selection(self) -> None:
+        selected = self.selected_item(self._categories)
+        if selected is not None:
+            wizard_state(self).os_category = selected
+
+    def select_category(self, index: int) -> None:
+        if not (0 <= index < len(self._categories)):
             return
         category = self._categories[index]
+        wizard_state(self).os_category = category
         matching = [
             e for e in self._entries if images.os_category(e) == category
         ]
