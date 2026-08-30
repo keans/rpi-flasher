@@ -1,0 +1,28 @@
+/* Minimal layout: stack widgets vertically, give the list widgets room. */
+
+#disk-select-body, #image-select-body, #options-body,
+#overview-body, #flash-progress-body {
+    padding: 1 2;
+}
+
+#title {
+    text-style: bold;
+    padding-bottom: 1;
+}
+
+#disk-table, #image-list {
+    height: 1fr;
+}
+
+#wlan-fields {
+    padding-left: 2;
+}
+
+#validation-error, #warnings {
+    color: red;
+}
+
+#detail {
+    color: $text-muted;
+    padding-top: 1;
+}
