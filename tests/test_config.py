@@ -5,6 +5,7 @@ from rpi_flasher.state import (
     DiskInfo,
     FlashOptions,
     ImageEntry,
+    UserConfig,
     WizardState,
     WlanConfig,
 )
@@ -13,7 +14,7 @@ from rpi_flasher.state import (
 def test_load_preferences_defaults_when_missing(tmp_path, monkeypatch):
     monkeypatch.setattr(config, "invoking_user_home", lambda: str(tmp_path))
     prefs = config.load_preferences()
-    assert prefs == FlashOptions()
+    assert prefs == FlashOptions(configure_user=True)
 
 
 def test_load_preferences_ignores_malformed_fields(tmp_path, monkeypatch):
@@ -56,6 +57,20 @@ def test_save_and_load_preferences_round_trip(tmp_path, monkeypatch):
     )
     # delete_image_after_flash is a per-run choice, not persisted.
     assert loaded.delete_image_after_flash is False
+
+
+def test_user_account_preferences_round_trip_as_hash(tmp_path, monkeypatch):
+    monkeypatch.setattr(config, "invoking_user_home", lambda: str(tmp_path))
+    options = FlashOptions(
+        configure_user=True,
+        user=UserConfig("pi-user", "$6$salt$hash"),
+    )
+
+    config.save_preferences(options)
+    loaded = config.load_preferences()
+
+    assert loaded.configure_user is True
+    assert loaded.user == UserConfig("pi-user", "$6$salt$hash")
 
 
 def test_wifi_credentials_are_not_saved_without_explicit_opt_in(

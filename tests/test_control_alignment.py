@@ -8,6 +8,7 @@ from rpi_flasher.screens._widgets import (
     make_labeled_checkbox,
     make_list_container,
 )
+from rpi_flasher.screens.user_details import UserDetailsScreen
 from rpi_flasher.screens.wlan_details import WlanDetailsScreen
 from rpi_flasher.state import FlashOptions
 
@@ -53,3 +54,15 @@ def test_wlan_editable_values_start_in_the_same_column():
             screen.country_field,
         )
     )
+
+
+def test_user_editable_values_start_in_the_same_column():
+    screen = UserDetailsScreen(FlashOptions(configure_user=True))
+
+    fields = (
+        screen.username_field,
+        screen.password_field,
+        screen.confirm_field,
+    )
+    assert len({len(field.prompt) for field in fields}) == 1
+    assert all(field.parent_align == CONTROL_ALIGN for field in fields)

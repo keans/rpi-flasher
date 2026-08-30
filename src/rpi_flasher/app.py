@@ -94,8 +94,10 @@ class RpiFlasherApp:
 
     def __init__(self) -> None:
         configure_theme()
-        self.state = WizardState()
+        preferences = config.load_preferences()
+        self.state = WizardState(options=preferences)
         self.saved_selections = config.load_selections()
+        self.remember_wlan = preferences.wlan is not None
         self._interrupted = False
         self.shutdown_trigger = "Quit"
         self.manager = RpiFlasherWindowManager()
@@ -205,13 +207,23 @@ class RpiFlasherApp:
         try:
             for screen in self._stack:
                 screen.store_selection()
-            try:
-                config.save_selections(self.state)
-            except (OSError, TypeError, ValueError) as exc:
-                print(
-                    f"warning: could not save selections: {exc}",
-                    file=sys.stderr,
-                )
+            saves = (
+                (
+                    "settings",
+                    lambda: config.save_preferences(
+                        self.state.options, remember_wlan=self.remember_wlan
+                    ),
+                ),
+                ("selections", lambda: config.save_selections(self.state)),
+            )
+            for label, save in saves:
+                try:
+                    save()
+                except (OSError, TypeError, ValueError) as exc:
+                    print(
+                        f"warning: could not save {label}: {exc}",
+                        file=sys.stderr,
+                    )
         finally:
             self.manager.stop()
 

@@ -5,7 +5,7 @@ from __future__ import annotations
 
 import pytermgui as ptg
 
-from rpi_flasher import WINDOW_TITLE
+from rpi_flasher import WINDOW_TITLE, images
 from rpi_flasher.screens._widgets import (
     CENTER_ALIGN,
     make_action_button,
@@ -44,6 +44,16 @@ class OverviewScreen(Screen):
             f"Image: {image.name}",
             f"SSH enabled: {'yes' if options.enable_ssh else 'no'}",
         ]
+        user_is_compatible = images.os_category(image) == "Raspberry Pi OS"
+        if options.configure_user and options.user:
+            status = (
+                "will be configured"
+                if user_is_compatible
+                else "unsupported by this image"
+            )
+            lines.append(f"User: {options.user.username!r} ({status})")
+        else:
+            lines.append("User: not configured")
         if options.setup_wlan and options.wlan:
             lines.append(
                 f"WLAN: ssid={options.wlan.ssid!r} "
@@ -69,6 +79,11 @@ class OverviewScreen(Screen):
                 f"WARNING: {human_bytes(disk.size_bytes)} is unusually "
                 "large for an SD card -- double-check you selected the "
                 "right device before continuing."
+            )
+        if options.configure_user and options.user and not user_is_compatible:
+            warnings.append(
+                "WARNING: user provisioning only works with compatible "
+                "Raspberry Pi OS images and will be skipped for this image."
             )
 
         self._no_button = make_action_button(

@@ -9,6 +9,7 @@ from rpi_flasher import WINDOW_TITLE, config
 from rpi_flasher.screens._widgets import (
     CONTROL_ALIGN,
     MaskedInputField,
+    align_prompts,
     make_action_button,
     make_labeled_checkbox,
 )
@@ -32,14 +33,17 @@ class WlanDetailsScreen(Screen):
         password = prefs.wlan.password if prefs.wlan else ""
         country = prefs.wlan.country if prefs.wlan else DEFAULT_COUNTRY
 
+        ssid_prompt, password_prompt, country_prompt = align_prompts(
+            ["SSID", "Password", "Country"]
+        )
         self.ssid_field = ptg.InputField(
-            ssid, prompt="SSID:     ", parent_align=CONTROL_ALIGN
+            ssid, prompt=ssid_prompt, parent_align=CONTROL_ALIGN
         )
         self.password_field = MaskedInputField(
-            password, prompt="Password: ", parent_align=CONTROL_ALIGN
+            password, prompt=password_prompt, parent_align=CONTROL_ALIGN
         )
         self.country_field = ptg.InputField(
-            country, prompt="Country:  ", parent_align=CONTROL_ALIGN
+            country, prompt=country_prompt, parent_align=CONTROL_ALIGN
         )
         self.remember_box = make_labeled_checkbox(
             "Remember Wi-Fi password on this Mac (stored in plaintext)",
@@ -79,13 +83,17 @@ class WlanDetailsScreen(Screen):
     def next(self) -> None:
         ssid = self.ssid_field.value.strip()
         if not ssid:
-            self._set_error("SSID is required when WLAN setup is enabled.")
+            self.set_error(
+                self._validation_label,
+                "SSID is required when WLAN setup is enabled.",
+            )
             return
 
         country = self.country_field.value.strip().upper()
         if len(country) != 2 or not country.isalpha():
-            self._set_error(
-                "Country must be a 2-letter ISO code, such as DE, US, or GB."
+            self.set_error(
+                self._validation_label,
+                "Country must be a 2-letter ISO code, such as DE, US, or GB.",
             )
             return
 
@@ -97,8 +105,15 @@ class WlanDetailsScreen(Screen):
         )
         finish_options(self, options, remember_wlan=self.remember_box.checked)
 
-    def _set_error(self, message: str) -> None:
-        self._validation_error = message
-        self._validation_label.value = (
-            f"[error bold]{ptg.escape_markup(message)}[/]"
+    def store_selection(self) -> None:
+        ssid = self.ssid_field.value.strip()
+        country = self.country_field.value.strip().upper()
+        if not ssid or len(country) != 2 or not country.isalpha():
+            return
+        self._pending_options.wlan = WlanConfig(
+            ssid=ssid,
+            password=self.password_field.value,
+            country=country,
         )
+        self.app.remember_wlan = self.remember_box.checked
+        self.app.state.options = self._pending_options

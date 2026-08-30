@@ -9,6 +9,10 @@ The interface filters out internal disks and fixed external drives, verifies
 downloaded images before writing, and defaults destructive confirmation to
 **No**.
 
+Disclaimer: this project is at early development stage, thus not all possible
+combinations of options have been tested. There is no guarantee that this
+will work for all edge cases.
+
 ## Requirements
 
 - macOS
@@ -50,38 +54,50 @@ before PyTermGUI takes over the screen.
 4. **Select image** — choose a specific image and see whether it is cached or
    needs downloading. OS and image steps are skipped when only one compatible
    choice remains.
-5. **Options** — enable SSH, configure WLAN, or delete the downloaded image
-   after a successful flash.
-6. **WLAN details** — enter the SSID, password, and two-letter country code.
+5. **Options** — enable SSH, configure a Pi user, configure WLAN, or delete the
+   downloaded image after a successful flash. User provisioning is enabled by
+   default, but is only available for compatible Raspberry Pi OS images.
+6. **User account** — enter the first-boot admin username and password. The
+   password is hashed immediately and only the hash is written to
+   `userconf.txt`. A saved account can be reused by leaving both password
+   fields blank. Incompatible images skip this customization and show a
+   warning on the confirmation screen.
+7. **WLAN details** — enter the SSID, password, and two-letter country code.
    Remembering the Wi-Fi password is optional and disabled unless explicitly
    selected.
-7. **Confirm** — review the disk, image, and customization choices, then
+8. **Confirm** — review the disk, image, and customization choices, then
    answer **No, go back** or **Yes, erase and flash**. No is focused by default.
    Images larger than the selected card cannot be confirmed.
-8. **Flashing** — download, decompress, verify, write, customize, and eject the
-   card with live progress and an estimated completion time.
+9. **Flashing** — download, decompress, verify, write, customize, and eject the
+   card with live progress and a moving-window completion estimate. The final
+   success screen offers only **Quit**; a failure offers **Retry** and
+   **Quit**.
 
 The downloaded, decompressed image cache is stored under
 `~/.cache/rpi-flasher/`. The latest OS-list snapshot is stored alongside it so
 the wizard can continue after a network failure.
 
-When the application exits, it remembers the highlighted disk, Pi model, OS
-family, and image. On the next launch, matching items are preselected; if a
-card or feed entry is no longer available, the corresponding screen safely
-falls back to its first item.
+When the application exits normally, through `q`, or through Ctrl+C, it saves
+the current options and highlighted disk, Pi model, OS family, and image. On
+the next launch, matching items are preselected. A remembered disk is restored
+only when its device node, capacity, and volume names still match, preventing
+the same `/dev/diskN` identifier from selecting a different card. Missing or
+changed items safely fall back to the first available choice.
 
 ## Keyboard controls
 
 - **Arrow keys** — move between controls and list entries
 - **Enter** — activate the selected control
-- **Tab** — jump directly to Next where available, or cycle through the
-  visible actions on the progress screen
+- **Tab** — jump directly to Next where available. On the User account screen,
+  cycle through username, password, password confirmation, and Next. On the
+  progress screen, cycle through the currently visible actions.
 - **Escape** — return to the previous screen and restore its previous
-  selection
+  selection. Escape is disabled on the final flashing screen.
 - **r** — rescan disks or retry loading the OS list on the relevant screen
 - **d** — delete the highlighted cached image on the image screen
 - **Left/Right** — choose No or Yes on the confirmation screen
-- **q** — quit when not typing in a text field
+- **q** — quit when not typing in a text field; during flashing it follows the
+  same safe cancellation rules as Ctrl+C
 - **Ctrl+C** — exit cleanly; during flashing, cancel first when safe or wait
   for an active raw write to finish. After the terminal is restored, a notice
   confirms that the interruption was handled and selections were saved.
@@ -90,7 +106,7 @@ During flashing, use the visible **Cancel** button to stop the operation.
 Cancelling during download or verification is safe to retry. Cancelling after
 raw writing begins leaves an incomplete card that must be reflashed before use.
 
-## WLAN credentials
+## Stored settings and credentials
 
 When remembering WLAN details is selected, they are stored in:
 
@@ -98,10 +114,16 @@ When remembering WLAN details is selected, they are stored in:
 ~/.config/rpi-flasher/config.json
 ```
 
-The file uses owner-only (`0600`) permissions, but the password is plaintext;
-there is currently no macOS Keychain integration. SSH and WLAN enablement
-preferences may be retained, while deleting an image after flashing remains a
+The file uses owner-only (`0600`) permissions, but a remembered WLAN password
+is plaintext; there is currently no macOS Keychain integration. Remembering
+the WLAN password is an explicit opt-in. SSH, WLAN, and user-provisioning
+enablement are retained, while deleting an image after flashing remains a
 per-run choice.
+
+The Pi account username and salted password hash are also remembered so they
+can be reused on later runs; the Pi account's plaintext password is never
+stored. Current option values are saved on quit even if the summary screen has
+not been reached.
 
 ## Flash pipeline
 
@@ -112,9 +134,11 @@ The application:
 3. Verifies the decompressed SHA-256 checksum.
 4. Writes to the corresponding raw device with progress reporting.
 5. Remounts and customizes the boot partition when requested.
-6. Writes `wpa_supplicant.conf` for legacy images or `custom.toml` for newer
+6. Writes `userconf.txt` with the username and salted password hash for
+   compatible Raspberry Pi OS images.
+7. Writes `wpa_supplicant.conf` for legacy images or `custom.toml` for newer
    cloud-init images.
-7. Ejects the card.
+8. Ejects the card.
 
 Non-fatal customization or eject problems remain visible on the completion
 screen instead of being hidden by a generic success message.

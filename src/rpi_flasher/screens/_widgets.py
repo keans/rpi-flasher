@@ -28,6 +28,24 @@ class MaskedInputField(ptg.InputField):
             self._lines = real_lines
             self._styled_cache = None
 
+    def clear_secret(self) -> None:
+        """Discard the underlying plaintext value after it has been used."""
+        self._lines = [""]
+        self._styled_cache = None
+
+
+def align_prompts(labels: list[str]) -> list[str]:
+    """Right-pad `"Label: "` prompts so a group of input fields' colons
+    (and the fields after them) line up in a column.
+
+    Both WLAN and user-details screens hand-counted spaces per label to
+    get this effect (`"SSID:     "`, `"Password:         "`); this
+    computes the padding from the labels themselves instead.
+    """
+    raw = [f"{label}: " for label in labels]
+    width = max(len(prompt) for prompt in raw)
+    return [prompt.ljust(width) for prompt in raw]
+
 
 def make_action_button(
     text: str, *, onclick: Callable[[ptg.Button], object] | None = None

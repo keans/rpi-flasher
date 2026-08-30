@@ -1,9 +1,10 @@
 from rpi_flasher.boot_customize import (
     apply,
     write_cloudinit_custom_toml,
+    write_userconf,
     write_wpa_supplicant,
 )
-from rpi_flasher.state import FlashOptions, ImageEntry, WlanConfig
+from rpi_flasher.state import FlashOptions, ImageEntry, UserConfig, WlanConfig
 
 
 def _image(init_format: str | None) -> ImageEntry:
@@ -74,3 +75,37 @@ def test_apply_picks_custom_toml_for_cloudinit_images(tmp_path):
     apply(tmp_path, _image("cloudinit-rpi"), options)
     assert (tmp_path / "custom.toml").exists()
     assert not (tmp_path / "wpa_supplicant.conf").exists()
+
+
+def test_write_userconf_contains_hash_not_plaintext(tmp_path):
+    user = UserConfig("pi-user", "$6$salt$hashed")
+    write_userconf(tmp_path, user)
+
+    assert (tmp_path / "userconf.txt").read_text() == (
+        "pi-user:$6$salt$hashed\n"
+    )
+
+
+def test_apply_writes_userconf_for_raspberry_pi_os(tmp_path):
+    image = _image(None)
+    options = FlashOptions(
+        configure_user=True,
+        user=UserConfig("pi", "$6$salt$hashed"),
+    )
+
+    apply(tmp_path, image, options)
+
+    assert (tmp_path / "userconf.txt").exists()
+
+
+def test_apply_skips_userconf_for_incompatible_image(tmp_path):
+    image = _image(None)
+    image.category_path = ["Other general-purpose OS"]
+    options = FlashOptions(
+        configure_user=True,
+        user=UserConfig("pi", "$6$salt$hashed"),
+    )
+
+    apply(tmp_path, image, options)
+
+    assert not (tmp_path / "userconf.txt").exists()

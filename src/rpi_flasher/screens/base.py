@@ -11,9 +11,9 @@ from __future__ import annotations
 from collections.abc import Callable
 from typing import TYPE_CHECKING, Any
 
-if TYPE_CHECKING:
-    import pytermgui as ptg
+import pytermgui as ptg
 
+if TYPE_CHECKING:
     from rpi_flasher.app import RpiFlasherApp
 
 
@@ -91,6 +91,18 @@ class Screen:
 
     def store_selection(self) -> None:
         """Copy this screen's highlighted choice into shared wizard state."""
+
+    def set_error(self, label: ptg.Label, message: str) -> None:
+        """Show a validation error in `label`, formatted consistently.
+
+        Shared by every free-text "details" screen (WLAN, user
+        provisioning) so the error markup/escaping lives in one place
+        instead of being copy-pasted per screen. Callers still keep
+        their own `self._validation_error` (used directly by tests) --
+        this only owns the label's rendered value.
+        """
+        self._validation_error = message
+        label.value = f"[error bold]{ptg.escape_markup(message)}[/]"
 
     def select_first(self) -> None:
         """Highlight the first selectable widget, if any.

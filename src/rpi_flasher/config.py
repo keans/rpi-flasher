@@ -16,7 +16,7 @@ from rpi_flasher.privilege import (
     invoking_user_home,
     write_user_owned_file,
 )
-from rpi_flasher.state import FlashOptions, WizardState, WlanConfig
+from rpi_flasher.state import FlashOptions, UserConfig, WizardState, WlanConfig
 
 
 @dataclass
@@ -51,9 +51,9 @@ def _load_data() -> dict:
 def load_preferences() -> FlashOptions:
     data = _load_data()
 
-    def boolean(name: str) -> bool:
-        value = data.get(name, False)
-        return value if isinstance(value, bool) else False
+    def boolean(name: str, *, default: bool = False) -> bool:
+        value = data.get(name, default)
+        return value if isinstance(value, bool) else default
 
     wlan_data = data.get("wlan")
     wlan = None
@@ -67,10 +67,24 @@ def load_preferences() -> FlashOptions:
             and isinstance(country, str)
         ):
             wlan = WlanConfig(ssid=ssid, password=password, country=country)
+    user_data = data.get("user")
+    user = None
+    if isinstance(user_data, dict):
+        username = user_data.get("username")
+        password_hash = user_data.get("password_hash")
+        if (
+            isinstance(username, str)
+            and username
+            and isinstance(password_hash, str)
+            and password_hash.startswith("$6$")
+        ):
+            user = UserConfig(username, password_hash)
     return FlashOptions(
         enable_ssh=boolean("enable_ssh"),
         setup_wlan=boolean("setup_wlan"),
         wlan=wlan,
+        configure_user=boolean("configure_user", default=True),
+        user=user,
     )
 
 
@@ -86,6 +100,8 @@ def save_preferences(
         {
             "enable_ssh": options.enable_ssh,
             "setup_wlan": options.setup_wlan,
+            "configure_user": options.configure_user,
+            "user": asdict(options.user) if options.user else None,
             "wlan": asdict(options.wlan)
             if remember_wlan and options.wlan
             else None,

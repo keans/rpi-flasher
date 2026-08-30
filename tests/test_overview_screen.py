@@ -2,7 +2,7 @@ from rpi_flasher.app import RpiFlasherApp
 from rpi_flasher.screens._widgets import CENTER_ALIGN
 from rpi_flasher.screens.flash_progress import FlashProgressScreen
 from rpi_flasher.screens.overview import OverviewScreen
-from rpi_flasher.state import DiskInfo, ImageEntry
+from rpi_flasher.state import DiskInfo, ImageEntry, UserConfig
 
 
 def _image(extract_size: int) -> ImageEntry:
@@ -76,4 +76,19 @@ def test_suspiciously_large_disk_shows_warning_but_stays_enabled():
     app.push_screen(screen)
 
     assert "unusually large" in screen._warnings_label.value
+    assert screen._yes_button.disabled is False
+
+
+def test_incompatible_user_provisioning_is_shown_as_warning():
+    app = RpiFlasherApp()
+    app.state.disk = DiskInfo("/dev/disk9", "/dev/rdisk9", 1000, [])
+    app.state.image = _image(extract_size=100)
+    app.state.image.category_path = ["Other general-purpose OS"]
+    app.state.options.configure_user = True
+    app.state.options.user = UserConfig("pi", "$6$salt$hash")
+
+    screen = OverviewScreen()
+    app.push_screen(screen)
+
+    assert "only works with compatible" in screen._warnings_label.value
     assert screen._yes_button.disabled is False

@@ -42,10 +42,18 @@ class WlanConfig:
 
 
 @dataclass
+class UserConfig:
+    username: str
+    password_hash: str
+
+
+@dataclass
 class FlashOptions:
     enable_ssh: bool = False
     setup_wlan: bool = False
     wlan: WlanConfig | None = None
+    configure_user: bool = True
+    user: UserConfig | None = None
     delete_image_after_flash: bool = False
 
 
@@ -91,8 +99,12 @@ def finish_options(
     finalized options, persist the reusable (ssh/wlan) preferences, and
     move on to the confirmation screen. `remember_wlan` is only consulted
     when `options.wlan` is set; the plain Options path has nothing
-    sensitive to opt in/out of, so it defaults to True."""
+    sensitive to opt in/out of, so it defaults to True. It lives only on
+    `screen.app` -- not on `FlashOptions` -- since it's a one-shot
+    instruction to `save_preferences()` at exit, not part of the wizard's
+    own state."""
     wizard_state(screen).options = options
+    screen.app.remember_wlan = remember_wlan
 
     from rpi_flasher.config import save_preferences
 

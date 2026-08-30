@@ -4,7 +4,8 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from rpi_flasher.state import FlashOptions, ImageEntry, WlanConfig
+from rpi_flasher import images
+from rpi_flasher.state import FlashOptions, ImageEntry, UserConfig, WlanConfig
 
 
 def _toml_escape(value: str) -> str:
@@ -16,6 +17,13 @@ def apply(
 ) -> None:
     if options.enable_ssh:
         (boot_mountpoint / "ssh").touch()
+
+    if (
+        options.configure_user
+        and options.user is not None
+        and images.os_category(image) == "Raspberry Pi OS"
+    ):
+        write_userconf(boot_mountpoint, options.user)
 
     if options.setup_wlan and options.wlan is not None:
         if image.init_format == "cloudinit-rpi":
@@ -37,6 +45,13 @@ def write_wpa_supplicant(boot_mountpoint: Path, wlan: WlanConfig) -> None:
         "}\n"
     )
     (boot_mountpoint / "wpa_supplicant.conf").write_text(content)
+
+
+def write_userconf(boot_mountpoint: Path, user: UserConfig) -> None:
+    """Provision a Pi OS user using a crypt-formatted password hash."""
+    (boot_mountpoint / "userconf.txt").write_text(
+        f"{user.username}:{user.password_hash}\n"
+    )
 
 
 def write_cloudinit_custom_toml(

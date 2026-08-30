@@ -1,8 +1,8 @@
-"""SSH/WLAN/delete-after-flash checkboxes. WLAN details (SSID/password/
-country) are collected on a separate follow-up screen only if requested,
-so this screen stays a quick yes/no gate rather than a wall of fields."""
+"""Optional image customization choices."""
 
 from __future__ import annotations
+
+from dataclasses import replace
 
 import pytermgui as ptg
 
@@ -12,7 +12,7 @@ from rpi_flasher.screens._widgets import (
     make_labeled_checkbox,
 )
 from rpi_flasher.screens.base import Screen
-from rpi_flasher.state import FlashOptions, finish_options
+from rpi_flasher.state import finish_options
 from rpi_flasher.theme import make_hint_label, make_step_label
 from rpi_flasher.utils import STEP_OPTIONS
 
@@ -22,6 +22,7 @@ class OptionsScreen(Screen):
         prefs = config.load_preferences()
         self.enable_ssh = prefs.enable_ssh
         self.setup_wlan = prefs.setup_wlan
+        self.configure_user = prefs.configure_user
         self.delete_after_flash = False
         self._enable_ssh_box = make_labeled_checkbox(
             "Enable SSH",
@@ -32,6 +33,11 @@ class OptionsScreen(Screen):
             "Setup WLAN",
             checked=self.setup_wlan,
             on_change=self._on_setup_wlan,
+        )
+        self._configure_user_box = make_labeled_checkbox(
+            "Configure username and password",
+            checked=self.configure_user,
+            on_change=self._on_configure_user,
         )
         self._delete_after_flash_box = make_labeled_checkbox(
             "Delete downloaded image after successful flash",
@@ -50,6 +56,11 @@ class OptionsScreen(Screen):
             ptg.Label(""),
             self._enable_ssh_box,
             self._setup_wlan_box,
+            self._configure_user_box,
+            make_hint_label(
+                "User provisioning only works with compatible Raspberry Pi "
+                "OS images."
+            ),
             self._delete_after_flash_box,
             ptg.Label(""),
             self.next_button,
@@ -69,16 +80,27 @@ class OptionsScreen(Screen):
     def _on_setup_wlan(self, checked: bool) -> None:
         self.setup_wlan = checked
 
+    def _on_configure_user(self, checked: bool) -> None:
+        self.configure_user = checked
+
     def _on_delete_after_flash(self, checked: bool) -> None:
         self.delete_after_flash = checked
 
     def next(self) -> None:
-        options = FlashOptions(
+        options = replace(
+            self.app.state.options,
             enable_ssh=self.enable_ssh,
             setup_wlan=self.setup_wlan,
             wlan=None,
+            configure_user=self.configure_user,
             delete_image_after_flash=self.delete_after_flash,
         )
+
+        if self.configure_user:
+            from rpi_flasher.screens.user_details import UserDetailsScreen
+
+            self.app.push_screen(UserDetailsScreen(options))
+            return
 
         if self.setup_wlan:
             from rpi_flasher.screens.wlan_details import WlanDetailsScreen
@@ -87,3 +109,12 @@ class OptionsScreen(Screen):
             return
 
         finish_options(self, options)
+
+    def store_selection(self) -> None:
+        self.app.state.options = replace(
+            self.app.state.options,
+            enable_ssh=self.enable_ssh,
+            setup_wlan=self.setup_wlan,
+            configure_user=self.configure_user,
+            delete_image_after_flash=self.delete_after_flash,
+        )

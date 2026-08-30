@@ -391,7 +391,11 @@ def _flash_inner(
     progress_cb(FlashProgress("Remounting", 0, 1))
     disks.mount_disk(disk.device_node)
 
-    if options.enable_ssh or options.setup_wlan:
+    if (
+        options.enable_ssh
+        or options.setup_wlan
+        or (options.configure_user and options.user is not None)
+    ):
         progress_cb(FlashProgress("Customizing boot partition", 0, 1))
         # The image itself is already flashed correctly at this point;
         # a customization failure (card removed, boot partition slow to
